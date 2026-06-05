@@ -28,7 +28,7 @@ WidgetMetadata = {
             type: "input",
             value: "",
             placeholders: [
-                { title: "浏览器验证后的 Cookie", value: "cf_clearance=..." }
+                { title: "浏览器验证后的 Cookie", value: "cf_clearance=c18aZp7ZtrlFgTO_gNTWM9UdF4GIiTcr7r4UPwhVLOs-1780623391-1.2.1.1-t8nl8XWJPK9imebkb0O_z1pMXeL5rPLHAj3E4expaFDplAHsx2CLia1Qi8Vmf5tObMwC95HtFrceXIBG7PP.ERy6x9e_ajEbSmDOymdKXkdHbXhvb8jEbgQgUAg83AzpHrYGLfUw0VXNKvu7dOWVcifH4vWVWX2IAbR_cumkW4wwUJXH6O1zSddoorfvbrza7JULBooJiJjEuAEjOMbdH2U5tetPXOfZx7Zt2Vh0DWathxR5_vVtS4X0jBX2M7bHKsu73Wi0__wWx4cVhuHdwCMMShXyx7g1KmgAHCnrST4rFIuyAZMUfDiv.cB8uQx.LiF4jw4IyEhVNZixL4Hg6l72TS4T1nFU5cLen.iY0RmsiyrrToxkpUJiLhgZlcNHTJjJYg2V.dxLdZgl4M17SjqGZ.XDBMjWuCZWPrNkPXM" }
             ]
         }
     ],
