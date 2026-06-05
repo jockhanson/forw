@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.2",
+  version: "1.0.3",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
@@ -26,14 +26,6 @@ WidgetMetadata = {
       placeholders: [
         { title: "浏览器通过验证后的 Cookie", value: "cf_clearance=...; other=value" },
       ],
-    },
-    {
-      id: "loadResource",
-      title: "BestJavPorn 播放源",
-      description: "提取正片播放源并优先返回最高画质",
-      functionName: "loadResource",
-      type: "stream",
-      params: [],
     },
   ],
   modules: [
@@ -63,6 +55,14 @@ WidgetMetadata = {
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
         { name: "page", title: "页码", type: "page" },
       ],
+    },
+    {
+      id: "loadResource",
+      title: "BestJavPorn 播放源",
+      description: "提取正片播放源并优先返回最高画质",
+      functionName: "loadResource",
+      type: "stream",
+      params: [],
     },
   ],
   search: {
