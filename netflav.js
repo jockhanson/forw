@@ -121,7 +121,8 @@ async function loadDetail(link) {
     const data = await apiGet(`/video/v2/retrieveVideo/${encodeURIComponent(videoId)}`, params, {});
     const detail = parseResultObject(data);
     if (!detail || !detail.videoId) return null;
-    return toDetailItem(detail);
+    const sources = await collectPlayableSources(detail, params);
+    return toDetailItem(detail, params, sources);
   } catch (error) {
     console.error("[netflav][loadDetail] 失败:", error.message || error);
     throw error;
@@ -139,11 +140,12 @@ async function loadResource(params = {}) {
     if (!videoId) return [];
     const data = await apiGet(`/video/v2/retrieveVideo/${encodeURIComponent(videoId)}`, runtimeParams, {});
     const detail = parseResultObject(data);
-    return collectSources(detail).map((url, index) => ({
+    const sources = await collectPlayableSources(detail, runtimeParams);
+    return sources.map((url, index) => ({
       name: playbackName(url, index),
       description: "Netflav",
       url,
-      customHeaders: mediaHeaders(runtimeParams),
+      customHeaders: mediaHeaders(runtimeParams, detailReferer(detail && detail.videoId, runtimeParams)),
     }));
   } catch (error) {
     console.error("[netflav][loadResource] 失败:", error.message || error);
@@ -188,13 +190,12 @@ function toVideoItem(video = {}) {
     description: cleanText(video.description || ""),
     durationText: cleanText(video.duration || ""),
     link: encodeDetailLink(videoId),
-    playerType: "system",
+    playerType: "ijk",
   };
 }
 
-function toDetailItem(video = {}) {
+function toDetailItem(video = {}, params = {}, sources = []) {
   const item = toVideoItem(video);
-  const sources = collectSources(video);
   item.backdropPaths = unique([cleanImage(video.preview)].concat(video.previewImages || expandPreviewImages(video.previewImagesUrl))).filter(Boolean);
   item.genreItems = cleanTags(video.tags).map((title) => ({ id: title, title }));
   item.peoples = cleanPeople(video.actors).map((title) => ({ id: title, title, role: "actor" }));
@@ -202,23 +203,92 @@ function toDetailItem(video = {}) {
     .filter((v) => String(v.videoId || "") !== String(video.videoId || ""))
     .map(toVideoItem);
   item.trailers = playableUrl(video.previewVideo) ? [{ coverUrl: item.posterPath, url: video.previewVideo }] : [];
+  item.customHeaders = mediaHeaders(params, detailReferer(video.videoId, params));
   if (sources[0]) item.videoUrl = sources[0];
   return item;
 }
 
-function collectSources(video = {}) {
+async function collectPlayableSources(video = {}, params = {}) {
+  const urls = [];
+  const rawSources = collectMovieSources(video);
+  for (const source of rawSources) {
+    if (isDirectMovieUrl(source)) {
+      pushSource(urls, source);
+      continue;
+    }
+    const resolved = await resolveEmbeddedSources(source, params);
+    for (const url of resolved) {
+      if (isDirectMovieUrl(url) || (!isPreviewUrl(url) && playableUrl(url))) pushSource(urls, url);
+    }
+  }
+  return unique(urls);
+}
+
+function collectMovieSources(video = {}) {
   const urls = [];
   pushSource(urls, video.src);
-  pushSource(urls, video.previewVideo);
+  pushSource(urls, video.premiumUrl);
   for (const key of ["srcs", "otherSrcs", "uSrc"]) {
     const list = Array.isArray(video[key]) ? video[key] : [];
-    for (const entry of list) pushSource(urls, typeof entry === "string" ? entry : entry && (entry.src || entry.url));
+    for (const entry of list) pushSource(urls, sourceUrlFromEntry(entry));
   }
-  return unique(urls).filter(playableUrl);
+  return unique(urls).filter((url) => playableUrl(url) && !isPreviewUrl(url));
 }
 
 function pushSource(urls, url) {
   if (typeof url === "string" && url.trim() && !url.startsWith("magnet:")) urls.push(url.trim());
+}
+
+function sourceUrlFromEntry(entry) {
+  if (typeof entry === "string") return entry;
+  if (!entry || typeof entry !== "object") return "";
+  return entry.src || entry.url || entry.file || entry.videoUrl || entry.hls || entry.m3u8 || "";
+}
+
+async function resolveEmbeddedSources(url, params = {}) {
+  const sourceId = embeddedSourceId(url);
+  if (!sourceId) return [];
+  try {
+    const data = await apiGet(`/video/ns1/${encodeURIComponent(sourceId)}`, params, {});
+    return extractPlayableUrls(parseResultObject(data));
+  } catch (error) {
+    console.error("[netflav][resolveEmbeddedSources] 解析失败:", error.message || error);
+    return [];
+  }
+}
+
+function embeddedSourceId(url) {
+  const value = playableUrl(url);
+  if (!value) return "";
+  const clean = value.split(/[?#]/)[0].replace(/\/+$/, "");
+  const parts = clean.split("/");
+  return decodeURIComponent(parts[parts.length - 1] || "");
+}
+
+function extractPlayableUrls(value, urls = []) {
+  if (!value) return urls;
+  if (typeof value === "string") {
+    if (playableUrl(value) && !isPreviewUrl(value)) pushSource(urls, value);
+    return urls;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) extractPlayableUrls(item, urls);
+    return urls;
+  }
+  if (typeof value === "object") {
+    for (const key in value) extractPlayableUrls(value[key], urls);
+  }
+  return unique(urls);
+}
+
+function isDirectMovieUrl(url) {
+  const value = playableUrl(url).toLowerCase();
+  return !!value && !isPreviewUrl(value) && /\.(m3u8|mp4)(?:[?#]|$)/i.test(value);
+}
+
+function isPreviewUrl(url) {
+  const value = String(url || "").toLowerCase();
+  return /(?:freepv|\/pv\/|preview|sample|trailer)/i.test(value);
 }
 
 function cleanTags(tags = []) {
@@ -277,19 +347,27 @@ function decodeDetailLink(link) {
   return match ? decodeURIComponent(match[1]) : value;
 }
 
+function detailReferer(videoId, params = {}) {
+  const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL);
+  return videoId ? `${baseUrl}/video?id=${encodeURIComponent(videoId)}` : baseUrl + "/";
+}
+
 function buildHeaders(params = {}) {
+  const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL);
   return {
     client: "client",
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     Accept: "application/json,text/plain,*/*",
-    Referer: normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL) + "/",
+    Referer: baseUrl + "/",
   };
 }
 
-function mediaHeaders(params = {}) {
+function mediaHeaders(params = {}, referer = "") {
+  const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL);
   return {
     "User-Agent": buildHeaders(params)["User-Agent"],
-    Referer: normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL) + "/",
+    Referer: referer || baseUrl + "/",
+    Origin: baseUrl,
   };
 }
 
