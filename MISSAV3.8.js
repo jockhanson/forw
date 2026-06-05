@@ -9,17 +9,17 @@ WidgetMetadata = {
     description: "MissAV 终极至尊完美版",
     version: "3.8.0",
     requiredVersion: "0.0.1",
-    site: "https://missav789.com",
+    site: "https://missav.ws",
     globalParams: [
         {
             name: "baseUrl",
             title: "站点地址",
             type: "input",
-            value: "https://missav789.com",
+            value: "https://missav.ws",
             placeholders: [
-                { title: "missav789.com", value: "https://missav789.com" },
-                { title: "missav.com", value: "https://missav.com" },
-                { title: "missav.ai", value: "https://missav.ai" }
+                { title: "missav.ws", value: "https://missav.ws" },
+                { title: "missav.ai", value: "https://missav.ai" },
+                { title: "missav.live", value: "https://missav.live" }
             ]
         },
         {
@@ -173,7 +173,7 @@ WidgetMetadata = {
 // 2. 全局环境核心配置与内存高速缓存定义段
 // =================================================================
 
-const DEFAULT_BASE_URL = "https://missav789.com";
+const DEFAULT_BASE_URL = "https://missav.ws";
 let BASE_URL = DEFAULT_BASE_URL;
 const AVATAR_BASE_URL = "https://missav.live";
 const HEADERS = {
@@ -295,7 +295,7 @@ function configureRuntime(params = {}) {
     let saved = {};
     try { saved = Widget.storage.get("missav.runtimeParams") || {}; } catch (e) {}
     const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
-    BASE_URL = normalizeBaseUrl(rawBaseUrl);
+    BASE_URL = isKnownSeizedBaseUrl(rawBaseUrl) ? DEFAULT_BASE_URL : normalizeBaseUrl(rawBaseUrl);
     HEADERS.Referer = BASE_URL + "/";
     const cookie = String(params.cfCookie || saved.cfCookie || "").trim();
     if (cookie) HEADERS.Cookie = cookie;
@@ -307,10 +307,27 @@ function normalizeBaseUrl(value) {
     return String(value || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
 }
 
+function isKnownSeizedBaseUrl(value) {
+    const host = normalizeBaseUrl(value).replace(/^https?:\/\//i, "").toLowerCase();
+    return host === "missav.com" || host === "www.missav.com" || host === "missav789.com" || host === "www.missav789.com";
+}
+
+function isSeizedOrNoticePage(html) {
+    const text = String(html || "");
+    return text.includes("domain was confiscated") ||
+        text.includes("通过法律程序对该域名进行没收") ||
+        text.includes("違法アップロード動画") ||
+        text.includes("JAV Anti-Piracy Project") ||
+        (text.includes("ThisAV") && text.includes("page-feature") && !text.includes("div class=\"group\""));
+}
+
 function explainHttpError(error) {
     const message = String((error && error.message) || error || "");
+    if (message.includes("域名没收") || message.includes("公告页")) {
+        throw error;
+    }
     if (message.includes("403")) {
-        throw new Error(`MissAV 返回 403。当前站点地址为 ${BASE_URL}，请尝试把模块参数“站点地址”切换为 https://missav789.com 或 https://missav.com；如果仍被 Cloudflare 拦截，请填入浏览器通过验证后的 Cloudflare Cookie。`);
+        throw new Error(`MissAV 返回 403。当前站点地址为 ${BASE_URL}，请先在浏览器打开该站并通过 Cloudflare 验证，然后把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。`);
     }
     throw error;
 }
@@ -642,6 +659,9 @@ function parseVideoList(html, options = {}) {
     const { currentPeople = null, currentGenre = null } = options;
     if (!html || html.includes("Just a moment")) {
         throw new Error("被 Cloudflare 拦截，请在 App 内尝试通过 WebView 验证过盾。");
+    }
+    if (isSeizedOrNoticePage(html)) {
+        throw new Error(`当前 MissAV 站点地址 ${BASE_URL} 返回的是域名没收/公告页，不是影片列表。请把模块参数“站点地址”改为当前可访问的新域名；若新域名返回 403，则填入 Cloudflare Cookie。`);
     }
 
     const $ = Widget.html.load(html);
