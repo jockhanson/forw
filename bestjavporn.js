@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.8",
+  version: "1.0.10",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
@@ -24,7 +24,16 @@ WidgetMetadata = {
       type: "input",
       value: "",
       placeholders: [
-        { title: "浏览器通过验证后的 Cookie", value: "cf_clearance=...; other=value" },
+        { title: "浏览器通过验证后的 Cookie", value: "cf_clearance=prh3xgBXFDDOdZ_RmtXEfPWvGfkFMHGOlBBzRvNOd1M-1780629543-1.2.1.1-ExGI8khwIIU3pNbVn4pwXjFuVuBJV2vkPATIJVowXlxN53uVOtcxzSFQtODNEpofn216p5oaWTPy9_Ns0h31mTb_JuGGO0gCLrQzc4wq9hlQuJ_Gt.SS41qvOFG2Vi90.EBq_YZJ.c.LxMlLOBATC58BH_rR2r4TW6X1az2Zwn5pBVT2yX69dsExe3EOedB7l2znQKn.9iC2bIpwpyMeHKWoXA5arEsfl84OQzaQCkfENxRmpBuckM3cM_9Zs1uoJ6DqbVJTodH2CECvUjPmWKwDPGPcptvCJ8bzaewdbYWPglicATCJqGkjvtEb_gBCzIsGn8sCubN4OSoOLk6oxg; other=value" },
+      ],
+    },
+    {
+      name: "userAgent",
+      title: "User-Agent",
+      type: "input",
+      value: "",
+      placeholders: [
+        { title: "留空使用默认；如 Cookie 无效请填获取 Cookie 时浏览器的 UA", value: "" },
       ],
     },
   ],
@@ -100,10 +109,10 @@ async function search(params = {}) {
 
 async function loadDetail(link) {
   try {
-    const href = normalizeBestJavPornUrl(decodeDetailLink(link));
+    const params = getRuntimeParams();
+    const href = normalizeBestJavPornUrl(decodeDetailLink(link), params.baseUrl);
     if (!href) return null;
     const baseUrl = getBaseUrlFromLink(href);
-    const params = getRuntimeParams();
     const html = await fetchPage(href, params);
     const detail = await parseVideoDetail(html, href, baseUrl, params);
     return detail || null;
@@ -139,7 +148,7 @@ async function loadResource(params = {}) {
 }
 
 async function fetchPage(url, params = {}) {
-  url = normalizeBestJavPornUrl(url);
+  url = normalizeBestJavPornUrl(url, params.baseUrl);
   let res;
   try {
     res = await Widget.http.get(url, {
@@ -179,9 +188,11 @@ async function fetchFirstAvailablePage(baseUrl, paths, page, params = {}) {
 }
 
 function buildHeaders(params = {}, referer) {
-  const cookie = String(params.cfCookie || "").trim();
+  const cookie = normalizeCookieHeader(params.cfCookie);
+  const userAgent = String(params.userAgent || "").trim() ||
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
   const headers = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "User-Agent": userAgent,
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
     Referer: referer || normalizeBaseUrl(params.baseUrl) + "/",
@@ -196,17 +207,24 @@ function mediaHeaders(params = {}, referer) {
   return headers;
 }
 
+function normalizeCookieHeader(value) {
+  const cookie = String(value || "").trim();
+  if (!cookie) return "";
+  return cookie.includes("=") ? cookie : "cf_clearance=" + cookie;
+}
+
 function rememberRuntimeParams(params = {}) {
   const saved = getRuntimeParams();
   const next = {
-    baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl),
+    baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl, params),
     cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
+    userAgent: String(params.userAgent || saved.userAgent || "").trim(),
   };
   Widget.storage.set("bestjavporn.runtimeParams", next);
 }
 
 function getRuntimeParams() {
-  return Widget.storage.get("bestjavporn.runtimeParams") || { baseUrl: DEFAULT_BASE_URL, cfCookie: "" };
+  return Widget.storage.get("bestjavporn.runtimeParams") || { baseUrl: DEFAULT_BASE_URL, cfCookie: "", userAgent: "" };
 }
 
 function parseVideoList(html, baseUrl) {
@@ -336,7 +354,7 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
 }
 
 async function fetchPageWithReferer(url, params = {}, referer) {
-  url = normalizeBestJavPornUrl(url);
+  url = normalizeBestJavPornUrl(url, params.baseUrl || referer);
   const res = await Widget.http.get(url, {
     headers: buildHeaders(params, referer),
   });
@@ -696,8 +714,9 @@ function unique(values) {
   });
 }
 
-function normalizeBaseUrl(baseUrl) {
+function normalizeBaseUrl(baseUrl, params = {}) {
   const value = String(baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  if (String((params && params.cfCookie) || "").trim()) return value;
   return value === "https://www.bestjavporn.com" ? "https://www3.bestjavporn.com" : value;
 }
 
@@ -720,13 +739,17 @@ function absolutize(url, baseUrl) {
   if (!url) return "";
   const value = decodeHtml(String(url).trim());
   if (!value || value.startsWith("data:")) return "";
-  if (/^https?:\/\//i.test(value)) return normalizeBestJavPornUrl(value);
+  if (/^https?:\/\//i.test(value)) return normalizeBestJavPornUrl(value, baseUrl);
   if (value.startsWith("//")) return "https:" + value;
   return normalizeBaseUrl(baseUrl) + "/" + trimSlashes(value);
 }
 
-function normalizeBestJavPornUrl(url) {
-  return String(url || "").replace(/^https?:\/\/www\.bestjavporn\.com\b/i, "https://www3.bestjavporn.com");
+function normalizeBestJavPornUrl(url, baseUrl) {
+  const value = String(url || "");
+  if (/^https?:\/\/www3\.bestjavporn\.com\b/i.test(String(baseUrl || ""))) {
+    return value.replace(/^https?:\/\/www\.bestjavporn\.com\b/i, "https://www3.bestjavporn.com");
+  }
+  return value;
 }
 
 function stripQuery(url) {
