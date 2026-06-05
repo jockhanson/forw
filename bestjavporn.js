@@ -1,18 +1,18 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.3",
+  version: "1.0.5",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
-  site: "https://www3.bestjavporn.com/",
+  site: "https://www.bestjavporn.com/",
   detailCacheDuration: 60,
   globalParams: [
     {
       name: "baseUrl",
       title: "站点地址",
       type: "input",
-      value: "https://www3.bestjavporn.com",
+      value: "https://www.bestjavporn.com",
       placeholders: [
         { title: "BestJavPorn www3", value: "https://www3.bestjavporn.com" },
         { title: "BestJavPorn www", value: "https://www.bestjavporn.com" },
@@ -56,14 +56,6 @@ WidgetMetadata = {
         { name: "page", title: "页码", type: "page" },
       ],
     },
-    {
-      id: "loadResource",
-      title: "BestJavPorn 播放源",
-      description: "提取正片播放源并优先返回最高画质",
-      functionName: "loadResource",
-      type: "stream",
-      params: [],
-    },
   ],
   search: {
     title: "搜索",
@@ -75,7 +67,7 @@ WidgetMetadata = {
   },
 };
 
-const DEFAULT_BASE_URL = "https://www3.bestjavporn.com";
+const DEFAULT_BASE_URL = "https://www.bestjavporn.com";
 
 async function loadList(params = {}) {
   try {
@@ -283,7 +275,6 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     backdropPaths: poster ? [poster] : [],
     description,
     videoUrl,
-    customHeaders: mediaHeaders(params, href),
     previewUrl: poster,
     link: encodeDetailLink(href),
     playerType: "system",
