@@ -9,7 +9,29 @@ WidgetMetadata = {
     description: "MissAV 终极至尊完美版",
     version: "3.8.0",
     requiredVersion: "0.0.1",
-    site: "https://missav.ai",
+    site: "https://missav789.com",
+    globalParams: [
+        {
+            name: "baseUrl",
+            title: "站点地址",
+            type: "input",
+            value: "https://missav789.com",
+            placeholders: [
+                { title: "missav789.com", value: "https://missav789.com" },
+                { title: "missav.com", value: "https://missav.com" },
+                { title: "missav.ai", value: "https://missav.ai" }
+            ]
+        },
+        {
+            name: "cfCookie",
+            title: "Cloudflare Cookie",
+            type: "input",
+            value: "",
+            placeholders: [
+                { title: "浏览器验证后的 Cookie", value: "cf_clearance=..." }
+            ]
+        }
+    ],
     modules: [
         {
             title: "最近更新",
@@ -151,13 +173,14 @@ WidgetMetadata = {
 // 2. 全局环境核心配置与内存高速缓存定义段
 // =================================================================
 
-const BASE_URL = "https://missav.ai";
+const DEFAULT_BASE_URL = "https://missav789.com";
+let BASE_URL = DEFAULT_BASE_URL;
 const AVATAR_BASE_URL = "https://missav.live";
 const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Referer": "https://missav.ai/",
+    "Referer": DEFAULT_BASE_URL + "/",
     "Connection": "keep-alive"
 };
 
@@ -267,6 +290,30 @@ function getMakerOptions() {
 // =================================================================
 // 4. 基础依赖底层通用辅助工具函数
 // =================================================================
+
+function configureRuntime(params = {}) {
+    let saved = {};
+    try { saved = Widget.storage.get("missav.runtimeParams") || {}; } catch (e) {}
+    const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
+    BASE_URL = normalizeBaseUrl(rawBaseUrl);
+    HEADERS.Referer = BASE_URL + "/";
+    const cookie = String(params.cfCookie || saved.cfCookie || "").trim();
+    if (cookie) HEADERS.Cookie = cookie;
+    else delete HEADERS.Cookie;
+    try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie }); } catch (e) {}
+}
+
+function normalizeBaseUrl(value) {
+    return String(value || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
+}
+
+function explainHttpError(error) {
+    const message = String((error && error.message) || error || "");
+    if (message.includes("403")) {
+        throw new Error(`MissAV 返回 403。当前站点地址为 ${BASE_URL}，请尝试把模块参数“站点地址”切换为 https://missav789.com 或 https://missav.com；如果仍被 Cloudflare 拦截，请填入浏览器通过验证后的 Cloudflare Cookie。`);
+    }
+    throw error;
+}
 
 function resolveUrl(path) {
     if (!path) return "";
@@ -412,6 +459,7 @@ function extractCodeFromParams(params = {}) {
 
 async function loadResource(params = {}) {
     try {
+        configureRuntime(params);
         const code = extractCodeFromParams(params);
         if (!code) return [];
 
@@ -498,7 +546,7 @@ async function loadResource(params = {}) {
                 name: trackName, 
                 description: `自适应多码率主干流`,
                 url: videoUrl,
-                customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
             });
             seenUrls.add(videoUrl.split('?')[0].toLowerCase());
 
@@ -521,7 +569,7 @@ async function loadResource(params = {}) {
                                     name: trackName + suffix,
                                     description: `物理分轨真实像素: ${detectedRes}`,
                                     url: trackUrl,
-                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
                                 });
                             }
                         }
@@ -568,7 +616,7 @@ async function loadResource(params = {}) {
                                     name: trackName + suffix,
                                     description: `系统核报真实像素: ${lastResolutionMatched}`,
                                     url: forcedHqUrl,
-                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
                                 });
                             }
                         }
@@ -579,6 +627,8 @@ async function loadResource(params = {}) {
         }
         return [];
     } catch (e) {
+        const message = String((e && e.message) || e || "");
+        if (message.includes("403")) explainHttpError(e);
         return [];
     }
 }
@@ -750,6 +800,7 @@ async function loadRecentUpdates(params = {}) {
 }
 
 async function loadList(params = {}) {
+    configureRuntime(params);
     let { endpoint = "cn/release", page = 1, sort_by = "", filters = "", primary_category = "", peopleId = "", genreId = "" } = params;
 
     let targetUrl = "";
@@ -808,21 +859,22 @@ async function loadList(params = {}) {
             const kw = decodeURIComponent(String(peopleId || genreId).split('/').pop() || "");
             if (kw) return await executeFetch(appendUrlParams(`${BASE_URL}/cn/search/${encodeURIComponent(kw.trim())}`, page, sort_by, ""));
         } catch (inner) {}
-        throw e;
+        explainHttpError(e);
     }
 }
 
 async function _executeSearchCore(keyword, page = 1, sort_by = "") {
+    configureRuntime({});
     if (!keyword) return [];
     let url = appendUrlParams(`${BASE_URL}/cn/search/${encodeURIComponent(keyword.trim())}`, page, sort_by, "");
     try {
         const res = await Widget.http.get(url, { headers: HEADERS });
         return parseVideoList(res.data);
-    } catch (e) { throw e; }
+    } catch (e) { explainHttpError(e); }
 }
 
-async function searchList(params = {}) { return _executeSearchCore(params.keyword, params.page, params.sort_by); }
-async function searchGlobal(params = {}) { return _executeSearchCore(params.keyword, params.page, params.sort_by); }
+async function searchList(params = {}) { configureRuntime(params); return _executeSearchCore(params.keyword, params.page, params.sort_by); }
+async function searchGlobal(params = {}) { configureRuntime(params); return _executeSearchCore(params.keyword, params.page, params.sort_by); }
 
 
 // =================================================================
@@ -1088,6 +1140,7 @@ async function parseAndBuildDetail(html, finalLink) {
 
 async function loadDetail(link) {
     if (!link) return null;
+    configureRuntime({});
     let cleanLink = resolveUrl(link); let html = ""; let finalValidLink = cleanLink;
     try {
         const res = await Widget.http.get(cleanLink, { headers: HEADERS });
@@ -1100,7 +1153,7 @@ async function loadDetail(link) {
                 let searchUrl = `${BASE_URL}/cn/search/${encodeURIComponent(code.trim())}`; const searchRes = await Widget.http.get(searchUrl, { headers: HEADERS }); const $search = Widget.html.load(searchRes.data);
                 if ($search('#videodetails').length > 0 || $search('meta[property="og:type"]').attr('content') === 'video.movie') { html = searchRes.data; finalValidLink = searchUrl; }
                 else { let firstHref = $search("div.group a.text-secondary").first().attr("href"); if (firstHref) { finalValidLink = resolveUrl(firstHref); html = (await Widget.http.get(finalValidLink, { headers: HEADERS })).data; } }
-            } catch (innerErr) { return null; }
+            } catch (innerErr) { explainHttpError(innerErr); }
         }
     }
     if (html) {
