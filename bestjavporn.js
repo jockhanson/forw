@@ -41,9 +41,13 @@ WidgetMetadata = {
           value: "",
           enumOptions: [
             { title: "首页", value: "" },
-            { title: "有码", value: "v13" },
-            { title: "无码", value: "v6" },
-            { title: "无码破解", value: "v10" },
+            { title: "有码", value: "category/censored" },
+            { title: "无码", value: "v4/category/uncensored" },
+            { title: "素人", value: "category/amateur" },
+            { title: "破解", value: "v1/category/decensored" },
+            { title: "英文字幕", value: "category/censored/english-subtitle" },
+            { title: "中文字幕", value: "category/chinese-subtitle" },
+            { title: "泰语字幕", value: "category/subthai" },
           ],
         },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
@@ -345,8 +349,26 @@ function listPaths(params) {
 function categoryPaths(value) {
   const id = trimSlashes(value);
   if (!id) return ["/"];
-  return [`/category/${id}/`, `/${id}/`, `/tag/${id}/`];
+  const mapped = CATEGORY_PATHS[id] || [];
+  const direct = id.includes("/") ? [`/${id}/`] : [];
+  return direct.concat(mapped, [`/category/${id}/`, `/${id}/`, `/tag/${id}/`]);
 }
+
+const CATEGORY_PATHS = {
+  censored: ["/category/censored/"],
+  uncensored: ["/v4/category/uncensored/", "/v6/category/uncensored/", "/category/uncensored/"],
+  amateur: ["/category/amateur/"],
+  decensored: ["/v1/category/decensored/", "/category/decensored/"],
+  "english-sub": ["/category/censored/english-subtitle/"],
+  "english-subtitle": ["/category/censored/english-subtitle/"],
+  "chinese-sub": ["/category/chinese-subtitle/"],
+  "chinese-subtitle": ["/category/chinese-subtitle/"],
+  subthai: ["/category/subthai/"],
+  "sub-indo": ["/category/subthai/"],
+  v13: ["/category/censored/"],
+  v6: ["/v4/category/uncensored/", "/v6/category/uncensored/"],
+  v10: ["/v1/category/decensored/"],
+};
 
 function unique(values) {
   const seen = {};
