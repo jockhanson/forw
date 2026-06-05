@@ -1,20 +1,21 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.1",
+  version: "1.0.2",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
-  site: "https://www.bestjavporn.com/",
+  site: "https://www3.bestjavporn.com/",
   detailCacheDuration: 60,
   globalParams: [
     {
       name: "baseUrl",
       title: "站点地址",
       type: "input",
-      value: "https://www.bestjavporn.com",
+      value: "https://www3.bestjavporn.com",
       placeholders: [
-        { title: "BestJavPorn", value: "https://www.bestjavporn.com" },
+        { title: "BestJavPorn www3", value: "https://www3.bestjavporn.com" },
+        { title: "BestJavPorn www", value: "https://www.bestjavporn.com" },
       ],
     },
     {
@@ -25,6 +26,14 @@ WidgetMetadata = {
       placeholders: [
         { title: "浏览器通过验证后的 Cookie", value: "cf_clearance=...; other=value" },
       ],
+    },
+    {
+      id: "loadResource",
+      title: "BestJavPorn 播放源",
+      description: "提取正片播放源并优先返回最高画质",
+      functionName: "loadResource",
+      type: "stream",
+      params: [],
     },
   ],
   modules: [
@@ -66,7 +75,7 @@ WidgetMetadata = {
   },
 };
 
-const DEFAULT_BASE_URL = "https://www.bestjavporn.com";
+const DEFAULT_BASE_URL = "https://www3.bestjavporn.com";
 
 async function loadList(params = {}) {
   try {
@@ -109,6 +118,31 @@ async function loadDetail(link) {
   } catch (error) {
     console.error("[bestjavporn][loadDetail] 失败:", error.message || error);
     throw error;
+  }
+}
+
+async function loadResource(params = {}) {
+  try {
+    const saved = getRuntimeParams();
+    const runtimeParams = {
+      baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl),
+      cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
+    };
+    const href = inferDetailHref(params, runtimeParams.baseUrl);
+    if (!href) return [];
+
+    const baseUrl = getBaseUrlFromLink(href);
+    const html = await fetchPage(href, runtimeParams);
+    const candidates = await collectPlayableCandidates(html, href, baseUrl, runtimeParams);
+    return candidates.map((candidate, index) => ({
+      name: playbackName(candidate.url, index),
+      description: candidate.source || "BestJavPorn",
+      url: candidate.url,
+      customHeaders: mediaHeaders(runtimeParams, href),
+    }));
+  } catch (error) {
+    console.error("[bestjavporn][loadResource] 失败:", error.message || error);
+    return [];
   }
 }
 
@@ -160,6 +194,12 @@ function buildHeaders(params = {}, referer) {
     Referer: referer || normalizeBaseUrl(params.baseUrl) + "/",
   };
   if (cookie) headers.Cookie = cookie;
+  return headers;
+}
+
+function mediaHeaders(params = {}, referer) {
+  const headers = buildHeaders(params, referer);
+  headers.Origin = getBaseUrlFromLink(referer || params.baseUrl || DEFAULT_BASE_URL);
   return headers;
 }
 
@@ -243,6 +283,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     backdropPaths: poster ? [poster] : [],
     description,
     videoUrl,
+    customHeaders: mediaHeaders(params, href),
     previewUrl: poster,
     link: encodeDetailLink(href),
     playerType: "system",
@@ -275,6 +316,11 @@ function parseTaxonomy(html, baseUrl, prefixes) {
 }
 
 async function selectBestPlayableUrl(html, referer, baseUrl, params = {}) {
+  const candidates = await collectPlayableCandidates(html, referer, baseUrl, params);
+  return candidates[0] ? candidates[0].url : "";
+}
+
+async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   const candidates = extractMediaCandidates(html, baseUrl);
 
   const iframeUrls = extractIframeUrls(html, baseUrl).filter((url) => !isPreviewUrl(url));
@@ -289,8 +335,12 @@ async function selectBestPlayableUrl(html, referer, baseUrl, params = {}) {
     }
   }
 
-  const best = bestMediaCandidate(uniqueCandidates(candidates));
-  return best ? await resolveBestPlayableVariant(best.url, referer, params) : "";
+  const expanded = [];
+  for (const candidate of uniqueCandidates(candidates).sort((a, b) => mediaScore(b.url) - mediaScore(a.url))) {
+    const variants = await resolvePlayableVariants(candidate.url, referer, params);
+    variants.forEach((variant) => expanded.push({ url: variant, source: candidate.source }));
+  }
+  return uniqueCandidates(expanded).sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
 }
 
 async function fetchPageWithReferer(url, params = {}, referer) {
@@ -338,21 +388,31 @@ function extractIframeUrls(html, baseUrl) {
 }
 
 async function resolveBestPlayableVariant(url, referer, params = {}) {
-  if (!/\.m3u8(?:[?#]|$)/i.test(url)) return url;
+  const variants = await resolvePlayableVariants(url, referer, params);
+  return variants[0] || url;
+}
+
+async function resolvePlayableVariants(url, referer, params = {}) {
+  if (!/\.m3u8(?:[?#]|$)/i.test(url)) return [url];
   try {
     const res = await Widget.http.get(url, {
       headers: buildHeaders(params, referer),
     });
-    const variant = bestM3u8Variant(String((res && res.data) || ""), url);
-    return variant || url;
+    const variants = bestM3u8Variants(String((res && res.data) || ""), url);
+    return variants.length ? variants : [url];
   } catch (error) {
     console.log("[bestjavporn][video] m3u8 清晰度解析失败:", (error && error.message) || error);
-    return url;
+    return [url];
   }
 }
 
 function bestM3u8Variant(playlist, playlistUrl) {
-  if (!/#EXT-X-STREAM-INF/i.test(playlist || "")) return "";
+  const variants = bestM3u8Variants(playlist, playlistUrl);
+  return variants[0] || "";
+}
+
+function bestM3u8Variants(playlist, playlistUrl) {
+  if (!/#EXT-X-STREAM-INF/i.test(playlist || "")) return [];
   const lines = String(playlist || "").split(/\r?\n/);
   let pending = null;
   const variants = [];
@@ -375,7 +435,7 @@ function bestM3u8Variant(playlist, playlistUrl) {
     }
   }
   variants.sort((a, b) => b.score - a.score);
-  return variants[0] ? variants[0].url : "";
+  return variants.map((item) => item.url);
 }
 
 function bestMediaCandidate(candidates) {
@@ -391,6 +451,13 @@ function mediaScore(url) {
   if (/bestjavporn|video|stream|hls|playlist|master|full|embed/i.test(value)) score += 5000;
   if (/preview|trailer|sample|freepv|javtrailers|thumbnail|thumb|teaser|promo|litevideo|avpreview|mgstage|dmm\.co\.jp/i.test(value)) score -= 10000000;
   return score;
+}
+
+function playbackName(url, index) {
+  const res = resolutionScore(url);
+  if (res) return `${res}P 正片`;
+  if (/\.m3u8(?:[?#]|$)/i.test(url)) return index === 0 ? "自适应正片" : "备用正片";
+  return index === 0 ? "正片" : `备用正片 ${index + 1}`;
 }
 
 function resolutionScore(value) {
@@ -576,7 +643,19 @@ function unique(values) {
 }
 
 function normalizeBaseUrl(baseUrl) {
-  return String(baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const value = String(baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  return value === "https://www.bestjavporn.com" ? "https://www3.bestjavporn.com" : value;
+}
+
+function inferDetailHref(params = {}, baseUrl) {
+  const values = [params.link, params.detailLink, params.href, params.url, params.webUrl];
+  for (const value of values) {
+    const decoded = decodeDetailLink(value);
+    if (decoded && /\/video\//i.test(decoded)) return absolutize(decoded, baseUrl);
+  }
+  const id = stableId(params.id || "");
+  if (id && !/^https?:/i.test(id) && !id.includes("undefined")) return `${normalizeBaseUrl(baseUrl)}/video/${trimSlashes(id)}/`;
+  return "";
 }
 
 function trimSlashes(value) {
