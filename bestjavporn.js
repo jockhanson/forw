@@ -73,8 +73,7 @@ async function loadList(params = {}) {
     const baseUrl = normalizeBaseUrl(params.baseUrl);
     rememberRuntimeParams(params);
     const page = Number(params.page || 1);
-    const path = listPath(params);
-    const html = await fetchPage(pageUrl(baseUrl, path, page), params);
+    const html = await fetchFirstAvailablePage(baseUrl, listPaths(params), page, params);
     return parseVideoList(html, baseUrl);
   } catch (error) {
     console.error("[bestjavporn][loadList] 失败:", error.message || error);
@@ -123,6 +122,9 @@ async function fetchPage(url, params = {}) {
     if (message.includes("403")) {
       throw new Error("目标站点返回 403/Cloudflare 验证。请先在浏览器打开站点并通过验证，然后把 Cookie 填入模块参数 Cloudflare Cookie（至少包含 cf_clearance）");
     }
+    if (message.includes("404")) {
+      throw new Error("HTTP_404:" + url);
+    }
     throw error;
   }
   const html = String((res && res.data) || "");
@@ -131,6 +133,21 @@ async function fetchPage(url, params = {}) {
     throw new Error("目标站点返回 Cloudflare 验证页。请把浏览器通过验证后的 Cookie 填入模块参数 Cloudflare Cookie（至少包含 cf_clearance）");
   }
   return html;
+}
+
+async function fetchFirstAvailablePage(baseUrl, paths, page, params = {}) {
+  const candidates = unique(paths).map((path) => pageUrl(baseUrl, path, page));
+  let last404 = "";
+  for (const url of candidates) {
+    try {
+      return await fetchPage(url, params);
+    } catch (error) {
+      const message = String((error && error.message) || error || "");
+      if (!message.startsWith("HTTP_404:")) throw error;
+      last404 = message.slice("HTTP_404:".length);
+    }
+  }
+  throw new Error("分类路径不存在: " + (last404 || candidates[0] || baseUrl));
 }
 
 function buildHeaders(params = {}) {
@@ -322,20 +339,27 @@ function pageUrl(baseUrl, path, page) {
   return `${baseUrl}${cleanPath}page/${Number(page)}/`;
 }
 
-function listPath(params) {
-  if (params.peopleId) return `/pornstar/${trimSlashes(params.peopleId)}/`;
-  if (params.genreId) return categoryPath(params.genreId);
-  if (params.category) return categoryPath(params.category);
-  return "/";
+function listPaths(params) {
+  if (params.peopleId) return [`/pornstar/${trimSlashes(params.peopleId)}/`, `/actor/${trimSlashes(params.peopleId)}/`, `/actress/${trimSlashes(params.peopleId)}/`];
+  if (params.genreId) return categoryPaths(params.genreId);
+  if (params.category) return categoryPaths(params.category);
+  return ["/"];
 }
 
-function categoryPath(value) {
+function categoryPaths(value) {
   const id = trimSlashes(value);
-  if (!id) return "/";
-  if (["censored", "uncensored", "amateur", "decensored", "english-sub", "chinese-sub", "sub-indo"].includes(id)) {
-    return `/${id}/`;
-  }
-  return `/category/${id}/`;
+  if (!id) return ["/"];
+  return [`/category/${id}/`, `/${id}/`, `/tag/${id}/`];
+}
+
+function unique(values) {
+  const seen = {};
+  return values.filter((value) => {
+    const key = String(value || "");
+    if (!key || seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
 }
 
 function normalizeBaseUrl(baseUrl) {
