@@ -9,7 +9,29 @@ WidgetMetadata = {
     description: "MissAV 终极至尊完美版",
     version: "3.8.0",
     requiredVersion: "0.0.1",
-    site: "https://missav.ai",
+    site: "https://missav.ws",
+    globalParams: [
+        {
+            name: "baseUrl",
+            title: "站点地址",
+            type: "input",
+            value: "https://missav.ws",
+            placeholders: [
+                { title: "missav.ws", value: "https://missav.ws" },
+                { title: "missav.ai", value: "https://missav.ai" },
+                { title: "missav.live", value: "https://missav.live" }
+            ]
+        },
+        {
+            name: "cfCookie",
+            title: "Cloudflare Cookie",
+            type: "input",
+            value: "",
+            placeholders: [
+                { title: "浏览器验证后的 Cookie", value: "cf_clearance=c18aZp7ZtrlFgTO_gNTWM9UdF4GIiTcr7r4UPwhVLOs-1780623391-1.2.1.1-t8nl8XWJPK9imebkb0O_z1pMXeL5rPLHAj3E4expaFDplAHsx2CLia1Qi8Vmf5tObMwC95HtFrceXIBG7PP.ERy6x9e_ajEbSmDOymdKXkdHbXhvb8jEbgQgUAg83AzpHrYGLfUw0VXNKvu7dOWVcifH4vWVWX2IAbR_cumkW4wwUJXH6O1zSddoorfvbrza7JULBooJiJjEuAEjOMbdH2U5tetPXOfZx7Zt2Vh0DWathxR5_vVtS4X0jBX2M7bHKsu73Wi0__wWx4cVhuHdwCMMShXyx7g1KmgAHCnrST4rFIuyAZMUfDiv.cB8uQx.LiF4jw4IyEhVNZixL4Hg6l72TS4T1nFU5cLen.iY0RmsiyrrToxkpUJiLhgZlcNHTJjJYg2V.dxLdZgl4M17SjqGZ.XDBMjWuCZWPrNkPXM" }
+            ]
+        }
+    ],
     modules: [
         {
             title: "最近更新",
@@ -151,13 +173,14 @@ WidgetMetadata = {
 // 2. 全局环境核心配置与内存高速缓存定义段
 // =================================================================
 
-const BASE_URL = "https://missav.ai";
+const DEFAULT_BASE_URL = "https://missav.ws";
+let BASE_URL = DEFAULT_BASE_URL;
 const AVATAR_BASE_URL = "https://missav.live";
 const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Referer": "https://missav.ai/",
+    "Referer": DEFAULT_BASE_URL + "/",
     "Connection": "keep-alive"
 };
 
@@ -267,6 +290,47 @@ function getMakerOptions() {
 // =================================================================
 // 4. 基础依赖底层通用辅助工具函数
 // =================================================================
+
+function configureRuntime(params = {}) {
+    let saved = {};
+    try { saved = Widget.storage.get("missav.runtimeParams") || {}; } catch (e) {}
+    const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
+    BASE_URL = isKnownSeizedBaseUrl(rawBaseUrl) ? DEFAULT_BASE_URL : normalizeBaseUrl(rawBaseUrl);
+    HEADERS.Referer = BASE_URL + "/";
+    const cookie = String(params.cfCookie || saved.cfCookie || "").trim();
+    if (cookie) HEADERS.Cookie = cookie;
+    else delete HEADERS.Cookie;
+    try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie }); } catch (e) {}
+}
+
+function normalizeBaseUrl(value) {
+    return String(value || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
+}
+
+function isKnownSeizedBaseUrl(value) {
+    const host = normalizeBaseUrl(value).replace(/^https?:\/\//i, "").toLowerCase();
+    return host === "missav.com" || host === "www.missav.com" || host === "missav789.com" || host === "www.missav789.com";
+}
+
+function isSeizedOrNoticePage(html) {
+    const text = String(html || "");
+    return text.includes("domain was confiscated") ||
+        text.includes("通过法律程序对该域名进行没收") ||
+        text.includes("違法アップロード動画") ||
+        text.includes("JAV Anti-Piracy Project") ||
+        (text.includes("ThisAV") && text.includes("page-feature") && !text.includes("div class=\"group\""));
+}
+
+function explainHttpError(error) {
+    const message = String((error && error.message) || error || "");
+    if (message.includes("域名没收") || message.includes("公告页")) {
+        throw error;
+    }
+    if (message.includes("403")) {
+        throw new Error(`MissAV 返回 403。当前站点地址为 ${BASE_URL}，请先在浏览器打开该站并通过 Cloudflare 验证，然后把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。`);
+    }
+    throw error;
+}
 
 function resolveUrl(path) {
     if (!path) return "";
@@ -412,6 +476,7 @@ function extractCodeFromParams(params = {}) {
 
 async function loadResource(params = {}) {
     try {
+        configureRuntime(params);
         const code = extractCodeFromParams(params);
         if (!code) return [];
 
@@ -498,7 +563,7 @@ async function loadResource(params = {}) {
                 name: trackName, 
                 description: `自适应多码率主干流`,
                 url: videoUrl,
-                customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
             });
             seenUrls.add(videoUrl.split('?')[0].toLowerCase());
 
@@ -521,7 +586,7 @@ async function loadResource(params = {}) {
                                     name: trackName + suffix,
                                     description: `物理分轨真实像素: ${detectedRes}`,
                                     url: trackUrl,
-                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
                                 });
                             }
                         }
@@ -568,7 +633,7 @@ async function loadResource(params = {}) {
                                     name: trackName + suffix,
                                     description: `系统核报真实像素: ${lastResolutionMatched}`,
                                     url: forcedHqUrl,
-                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                                    customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
                                 });
                             }
                         }
@@ -579,6 +644,8 @@ async function loadResource(params = {}) {
         }
         return [];
     } catch (e) {
+        const message = String((e && e.message) || e || "");
+        if (message.includes("403")) explainHttpError(e);
         return [];
     }
 }
@@ -592,6 +659,9 @@ function parseVideoList(html, options = {}) {
     const { currentPeople = null, currentGenre = null } = options;
     if (!html || html.includes("Just a moment")) {
         throw new Error("被 Cloudflare 拦截，请在 App 内尝试通过 WebView 验证过盾。");
+    }
+    if (isSeizedOrNoticePage(html)) {
+        throw new Error(`当前 MissAV 站点地址 ${BASE_URL} 返回的是域名没收/公告页，不是影片列表。请把模块参数“站点地址”改为当前可访问的新域名；若新域名返回 403，则填入 Cloudflare Cookie。`);
     }
 
     const $ = Widget.html.load(html);
@@ -750,6 +820,7 @@ async function loadRecentUpdates(params = {}) {
 }
 
 async function loadList(params = {}) {
+    configureRuntime(params);
     let { endpoint = "cn/release", page = 1, sort_by = "", filters = "", primary_category = "", peopleId = "", genreId = "" } = params;
 
     let targetUrl = "";
@@ -808,21 +879,22 @@ async function loadList(params = {}) {
             const kw = decodeURIComponent(String(peopleId || genreId).split('/').pop() || "");
             if (kw) return await executeFetch(appendUrlParams(`${BASE_URL}/cn/search/${encodeURIComponent(kw.trim())}`, page, sort_by, ""));
         } catch (inner) {}
-        throw e;
+        explainHttpError(e);
     }
 }
 
 async function _executeSearchCore(keyword, page = 1, sort_by = "") {
+    configureRuntime({});
     if (!keyword) return [];
     let url = appendUrlParams(`${BASE_URL}/cn/search/${encodeURIComponent(keyword.trim())}`, page, sort_by, "");
     try {
         const res = await Widget.http.get(url, { headers: HEADERS });
         return parseVideoList(res.data);
-    } catch (e) { throw e; }
+    } catch (e) { explainHttpError(e); }
 }
 
-async function searchList(params = {}) { return _executeSearchCore(params.keyword, params.page, params.sort_by); }
-async function searchGlobal(params = {}) { return _executeSearchCore(params.keyword, params.page, params.sort_by); }
+async function searchList(params = {}) { configureRuntime(params); return _executeSearchCore(params.keyword, params.page, params.sort_by); }
+async function searchGlobal(params = {}) { configureRuntime(params); return _executeSearchCore(params.keyword, params.page, params.sort_by); }
 
 
 // =================================================================
@@ -1088,6 +1160,7 @@ async function parseAndBuildDetail(html, finalLink) {
 
 async function loadDetail(link) {
     if (!link) return null;
+    configureRuntime({});
     let cleanLink = resolveUrl(link); let html = ""; let finalValidLink = cleanLink;
     try {
         const res = await Widget.http.get(cleanLink, { headers: HEADERS });
@@ -1100,7 +1173,7 @@ async function loadDetail(link) {
                 let searchUrl = `${BASE_URL}/cn/search/${encodeURIComponent(code.trim())}`; const searchRes = await Widget.http.get(searchUrl, { headers: HEADERS }); const $search = Widget.html.load(searchRes.data);
                 if ($search('#videodetails').length > 0 || $search('meta[property="og:type"]').attr('content') === 'video.movie') { html = searchRes.data; finalValidLink = searchUrl; }
                 else { let firstHref = $search("div.group a.text-secondary").first().attr("href"); if (firstHref) { finalValidLink = resolveUrl(firstHref); html = (await Widget.http.get(finalValidLink, { headers: HEADERS })).data; } }
-            } catch (innerErr) { return null; }
+            } catch (innerErr) { explainHttpError(innerErr); }
         }
     }
     if (html) {
