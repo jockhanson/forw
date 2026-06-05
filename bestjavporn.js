@@ -17,6 +17,15 @@ WidgetMetadata = {
         { title: "BestJavPorn", value: "https://www.bestjavporn.com" },
       ],
     },
+    {
+      name: "cfCookie",
+      title: "Cloudflare Cookie",
+      type: "input",
+      value: "",
+      placeholders: [
+        { title: "浏览器通过验证后的 Cookie", value: "cf_clearance=...; other=value" },
+      ],
+    },
   ],
   modules: [
     {
@@ -62,9 +71,10 @@ const DEFAULT_BASE_URL = "https://www.bestjavporn.com";
 async function loadList(params = {}) {
   try {
     const baseUrl = normalizeBaseUrl(params.baseUrl);
+    rememberRuntimeParams(params);
     const page = Number(params.page || 1);
     const path = listPath(params);
-    const html = await fetchPage(pageUrl(baseUrl, path, page));
+    const html = await fetchPage(pageUrl(baseUrl, path, page), params);
     return parseVideoList(html, baseUrl);
   } catch (error) {
     console.error("[bestjavporn][loadList] 失败:", error.message || error);
@@ -77,9 +87,10 @@ async function search(params = {}) {
     const keyword = String(params.keyword || "").trim();
     if (!keyword) return [];
     const baseUrl = normalizeBaseUrl(params.baseUrl);
+    rememberRuntimeParams(params);
     const page = Number(params.page || 1);
     const path = page <= 1 ? "/" : `/page/${page}/`;
-    const html = await fetchPage(`${baseUrl}${path}?s=${encodeURIComponent(keyword)}`);
+    const html = await fetchPage(`${baseUrl}${path}?s=${encodeURIComponent(keyword)}`, params);
     return parseVideoList(html, baseUrl);
   } catch (error) {
     console.error("[bestjavporn][search] 失败:", error.message || error);
@@ -92,7 +103,7 @@ async function loadDetail(link) {
     const href = decodeDetailLink(link);
     if (!href) return null;
     const baseUrl = getBaseUrlFromLink(href);
-    const html = await fetchPage(href);
+    const html = await fetchPage(href, getRuntimeParams());
     const detail = parseVideoDetail(html, href, baseUrl);
     return detail || null;
   } catch (error) {
@@ -101,20 +112,50 @@ async function loadDetail(link) {
   }
 }
 
-async function fetchPage(url) {
-  const res = await Widget.http.get(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      Referer: DEFAULT_BASE_URL + "/",
-    },
-  });
+async function fetchPage(url, params = {}) {
+  let res;
+  try {
+    res = await Widget.http.get(url, {
+      headers: buildHeaders(params),
+    });
+  } catch (error) {
+    const message = String((error && error.message) || error || "");
+    if (message.includes("403")) {
+      throw new Error("目标站点返回 403/Cloudflare 验证。请先在浏览器打开站点并通过验证，然后把 Cookie 填入模块参数 Cloudflare Cookie（至少包含 cf_clearance）");
+    }
+    throw error;
+  }
   const html = String((res && res.data) || "");
   if (!html) throw new Error("空响应");
   if (html.includes("cf_chl_") || html.includes("Just a moment...")) {
-    throw new Error("目标站点返回 Cloudflare 验证页，当前运行环境无法直接解析");
+    throw new Error("目标站点返回 Cloudflare 验证页。请把浏览器通过验证后的 Cookie 填入模块参数 Cloudflare Cookie（至少包含 cf_clearance）");
   }
   return html;
+}
+
+function buildHeaders(params = {}) {
+  const cookie = String(params.cfCookie || "").trim();
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+    Referer: normalizeBaseUrl(params.baseUrl) + "/",
+  };
+  if (cookie) headers.Cookie = cookie;
+  return headers;
+}
+
+function rememberRuntimeParams(params = {}) {
+  const saved = getRuntimeParams();
+  const next = {
+    baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl),
+    cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
+  };
+  Widget.storage.set("bestjavporn.runtimeParams", next);
+}
+
+function getRuntimeParams() {
+  return Widget.storage.get("bestjavporn.runtimeParams") || { baseUrl: DEFAULT_BASE_URL, cfCookie: "" };
 }
 
 function parseVideoList(html, baseUrl) {
