@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.10",
+  version: "1.0.12",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
@@ -65,6 +65,13 @@ WidgetMetadata = {
         { name: "page", title: "页码", type: "page" },
       ],
     },
+    {
+      id: "loadResource",
+      title: "BestJavPorn 播放源",
+      functionName: "loadResource",
+      type: "stream",
+      params: [],
+    },
   ],
   search: {
     title: "搜索",
@@ -126,8 +133,11 @@ async function loadResource(params = {}) {
   try {
     const saved = getRuntimeParams();
     const runtimeParams = {
-      baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl),
+      baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl, {
+        cfCookie: params.cfCookie || saved.cfCookie,
+      }),
       cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
+      userAgent: String(params.userAgent || saved.userAgent || "").trim(),
     };
     const href = inferDetailHref(params, runtimeParams.baseUrl);
     if (!href) return [];
@@ -287,7 +297,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
 
   return {
     id: stableId(href),
-    type: "url",
+    type: "detail",
     title: title || stableId(href),
     posterPath: poster,
     backdropPath: poster,
@@ -296,7 +306,8 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     videoUrl,
     previewUrl: poster,
     link: encodeDetailLink(href),
-    playerType: /\.html?(?:[?#]|$)|\/embed\//i.test(videoUrl) ? "app" : "system",
+    playerType: "ijk",
+    customHeaders: mediaHeaders(params, href),
     genreItems: genres,
     peoples,
     relatedItems,
@@ -365,6 +376,7 @@ function extractMediaCandidates(html, baseUrl) {
   const normalized = normalizeEscapedText(html);
   const searchable = normalized + "\n" + unpackPacker(normalized) + "\n" + decodeEmbeddedBase64Text(normalized);
   const candidates = [];
+  collectMediaMatches(candidates, searchable, /\b(?:var\s+)?hlsUrl\s*=\s*(["'])(.*?)\1/gi, baseUrl, "hlsUrl", 2);
   collectMediaMatches(candidates, searchable, /<(?:source|video)\b[^>]*src=(["'])(.*?)\1/gi, baseUrl, "source", 2);
   collectMediaMatches(candidates, searchable, /<meta\b[^>]*(?:property|name)=(["'])(?:og:video|og:video:url|twitter:player:stream|video)\1[^>]*content=(["'])(.*?)\2/gi, baseUrl, "meta", 3);
   collectMediaMatches(candidates, searchable, /\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2);
