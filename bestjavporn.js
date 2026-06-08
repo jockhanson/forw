@@ -382,10 +382,10 @@ function extractMediaCandidates(html, baseUrl) {
   collectMediaMatches(candidates, searchable, /\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2);
   collectMediaMatches(candidates, searchable, /\b(?:file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*([^"',}\]\s<>]+)/gi, baseUrl, "script", 1);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\.(?:m3u8|mp4|webm)(?:\?[^"'<>\s\\]*)?)/gi, baseUrl, "url", 1);
-  collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player)[^"'<>\s\\]*)/gi, baseUrl, "url", 1);
+  collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player|v\.php|source|file)[^"'<>\s\\]*)/gi, baseUrl, "url", 1);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/wp-admin\/admin-ajax\.php\?[^"'<>\s\\]+)/gi, baseUrl, "ajax", 1);
   collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\.(?:m3u8|mp4|webm)(?:\?[^"']*)?)\1/gi, baseUrl, "relative", 2);
-  collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player)[^"']*)\1/gi, baseUrl, "relative", 2);
+  collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player|v\.php|source|file)[^"']*)\1/gi, baseUrl, "relative", 2);
   collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\/wp-admin\/admin-ajax\.php\?[^"']*)\1/gi, baseUrl, "ajax", 2);
   buildAjaxCandidates(searchable, baseUrl).forEach((url) => candidates.push({ url, source: "ajax" }));
   return uniqueCandidates(candidates).filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url));
@@ -516,8 +516,9 @@ function mediaScore(url) {
   if (/\/(?:get_file|dl|download|stream|video|media|hls|playlist|master)\b/i.test(value)) score += 800000;
   if (/(?:player|embed)\.php|\/(?:player|embed)\//i.test(value)) score += 200000;
   score += resolutionScore(value) * 1000;
-  if (/bestjavporn|video|stream|hls|playlist|master|full|get_file|player|embed/i.test(value)) score += 5000;
-  if (/preview|trailer|sample|freepv|javtrailers|thumbnail|thumb|teaser|promo|litevideo|avpreview|mgstage|dmm\.co\.jp|ads?|banner|\/cuts?\/|\/clips?\/|\/shorts?\//i.test(value)) score -= 10000000;
+  if (/bestjavporn|stream|hls|playlist|master|get_file|player|embed/i.test(value)) score += 5000;
+  if (/\/(?:pv|freepv|trailers?|cuts?|clips?|shorts?)\//i.test(value)) score -= 10000000;
+  else if (/(?:preview|sample|javtrailers|teaser|promo|litevideo|avpreview|sample\.mgstage|cc3001\.dmm\.co\.jp|ads?|banner)/i.test(value)) score -= 10000000;
   return score;
 }
 
@@ -552,7 +553,14 @@ function absolutizeM3u8Variant(value, playlistUrl) {
 }
 
 function isPreviewUrl(url) {
-  return /(?:preview|trailer|sample|freepv|javtrailers|thumbnail|thumb|teaser|promo|litevideo|avpreview|sample\.mgstage|cc3001\.dmm\.co\.jp|\/pv\/|\/freepv\/|\/trailers?\/|\/cuts?\/|\/clips?\/|\/shorts?\/)/i.test(String(url || ""));
+  const value = String(url || "");
+  if (/\/(?:pv|freepv|trailers?|cuts?|clips?|shorts?)\//i.test(value)) return true;
+  if (/(?:preview|trailer|sample|freepv|javtrailers|teaser|promo|litevideo|avpreview|sample\.mgstage|cc3001\.dmm\.co\.jp)/i.test(value)) {
+    if (/\/(?:video|media|stream|hls|playlist|master|get_file|dl|download|embed|player)\//i.test(value)) return false;
+    if (/\.(?:m3u8|mp4|webm)(?:[?#]|$)/i.test(value)) return false;
+    return true;
+  }
+  return false;
 }
 
 function isPlayableCandidate(url) {
@@ -561,7 +569,7 @@ function isPlayableCandidate(url) {
   if (/\.(?:jpg|jpeg|png|webp|gif|svg|css|js|ico)(?:[?#]|$)/i.test(value)) return false;
   if (/\/(?:ads?|banner|analytics|captcha|cdn-cgi)\b/i.test(value)) return false;
   return /\.(?:m3u8|mp4|webm)(?:[?#]|$)/i.test(value) ||
-    /\/(?:get_file|dl|download|stream|video|media|hls|playlist|master)(?:[\/?#]|$)/i.test(value) ||
+    /\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|v\.php|source|file)(?:[\/?#]|$)/i.test(value) ||
     /(?:player|embed)\.php(?:[?#]|$)|\/(?:player|embed)\//i.test(value) ||
     /admin-ajax\.php\?/i.test(value);
 }
