@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.12",
+  version: "1.0.13",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
@@ -145,6 +145,9 @@ async function loadResource(params = {}) {
     const baseUrl = getBaseUrlFromLink(href);
     const html = await fetchPage(href, runtimeParams);
     const candidates = await collectPlayableCandidates(html, href, baseUrl, runtimeParams);
+    console.log("[bestjavporn][loadResource] 页面:", href);
+    console.log("[bestjavporn][loadResource] 候选数:", candidates.length);
+    candidates.forEach((c, i) => console.log("[bestjavporn][loadResource]  #" + i, c.url));
     return candidates.map((candidate, index) => ({
       name: playbackName(candidate.url, index),
       description: candidate.source || "BestJavPorn",
@@ -343,12 +346,18 @@ async function selectBestPlayableUrl(html, referer, baseUrl, params = {}) {
 
 async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   const candidates = extractMediaCandidates(html, baseUrl);
+  console.log("[bestjavporn][candidates] 页面直接提取:", candidates.length);
+  candidates.forEach((c, i) => console.log("[bestjavporn][candidates]   #" + i, c.source, c.url));
 
   const iframeUrls = extractIframeUrls(html, baseUrl).filter((url) => !isPreviewUrl(url));
+  console.log("[bestjavporn][candidates] iframe 数量:", iframeUrls.length);
   for (const iframeUrl of iframeUrls) {
     try {
       const iframeHtml = await fetchPageWithReferer(iframeUrl, params, referer);
-      extractMediaCandidates(iframeHtml, iframeUrl).forEach((candidate) => {
+      const found = extractMediaCandidates(iframeHtml, iframeUrl);
+      console.log("[bestjavporn][candidates]   iframe 提取:", iframeUrl, "->", found.length);
+      found.forEach((candidate) => {
+        console.log("[bestjavporn][candidates]     ", candidate.url);
         candidates.push({ url: candidate.url, source: "iframe:" + iframeUrl });
       });
     } catch (error) {
@@ -356,12 +365,161 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
     }
   }
 
+  const directMedia = candidates.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
+  if (directMedia.length === 0) {
+    console.log("[bestjavporn][candidates] 未发现直接视频 URL，尝试从脚本/JSON 提取...");
+    const scriptMedia = await extractVideoFromScripts(html, referer, baseUrl, params);
+    scriptMedia.forEach((url) => candidates.push({ url, source: "script-probe" }));
+    console.log("[bestjavporn][candidates] script-probe 新增:", scriptMedia.length);
+  }
+
+  if (candidates.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url)).length === 0) {
+    console.log("[bestjavporn][candidates] 仍未发现直接视频 URL，尝试从播放器 API 提取...");
+    const apiCandidates = await probePlayerApis(html, referer, baseUrl, params);
+    apiCandidates.forEach((url) => candidates.push({ url, source: "api-probe" }));
+    console.log("[bestjavporn][candidates] api-probe 新增:", apiCandidates.length);
+  }
+
+  const deduped = uniqueCandidates(candidates);
+  console.log("[bestjavporn][candidates] 去重后:", deduped.length);
   const expanded = [];
-  for (const candidate of uniqueCandidates(candidates).sort((a, b) => mediaScore(b.url) - mediaScore(a.url))) {
+  for (const candidate of deduped.sort((a, b) => mediaScore(b.url) - mediaScore(a.url))) {
     const variants = await resolvePlayableVariants(candidate.url, referer, params);
     variants.forEach((variant) => expanded.push({ url: variant, source: candidate.source }));
   }
-  return uniqueCandidates(expanded).sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
+  const result = uniqueCandidates(expanded).sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
+  console.log("[bestjavporn][candidates] 最终:", result.length);
+  result.forEach((r, i) => console.log("[bestjavporn][candidates]   结果#" + i, r.url));
+  return result;
+}
+
+async function probePlayerApis(html, referer, baseUrl, params) {
+  const found = [];
+  const apiPatterns = [
+    /["'](https?:\/\/[^"']*(?:watch|load|stream|video|source|file|data|embed|player|api|ajax|action|media|playlist|src)[^"']*)["']/gi,
+    /["']((?:\/\/|\/)[^"'\s]*(?:watch|load|stream|video|source|file|data|embed|player|api|ajax|action|media|playlist|src)[^"'\s]*)["']/gi,
+  ];
+  const seen = new Set();
+  for (const re of apiPatterns) {
+    let match;
+    re.lastIndex = 0;
+    while ((match = re.exec(html))) {
+      const url = absolutize(match[1], baseUrl);
+      if (!url || seen.has(url) || isPreviewUrl(url)) continue;
+      seen.add(url);
+      if (!shouldProbePlayableUrl(url) && !/\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(url)) continue;
+      try {
+        const res = await Widget.http.get(url, { headers: buildHeaders(params, referer) });
+        const body = String((res && res.data) || "");
+        if (/#EXTM3U/i.test(body)) {
+          const variants = bestM3u8Variants(body, url);
+          variants.forEach((v) => found.push(v));
+        } else if (/\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(body)) {
+          const urls = body.match(/(https?:\/\/[^"'<>\s\\]+\.(?:mp4|m3u8|webm)(?:\?[^"'<>\s\\]*)?)/gi);
+          if (urls) urls.forEach((u) => found.push(u));
+        }
+      } catch (e) {}
+    }
+  }
+
+  const videoIdRe = /["'](?:videoId|video_id|v|fileId|file_id|id|postId|post_id)["']\s*[:=]\s*(["'])([A-Za-z0-9_\-]+)\1/gi;
+  const videoIds = new Set();
+  let m;
+  while ((m = videoIdRe.exec(html))) videoIds.add(m[2]);
+  const apiEndpoints = [
+    "/wp-admin/admin-ajax.php",
+    "/api/video",
+    "/api/watch",
+    "/api/stream",
+    "/video/source",
+    "/video/watch",
+    "/player/api",
+    "/embed/api",
+  ];
+  const base = normalizeBaseUrl(baseUrl);
+  for (const id of videoIds) {
+    for (const ep of apiEndpoints) {
+      const url = `${base}${ep}?id=${id}&video_id=${id}&post_id=${id}&file_id=${id}&action=get_video&action=getSource`;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      try {
+        const res = await Widget.http.get(url, { headers: buildHeaders(params, referer) });
+        const body = String((res && res.data) || "");
+        if (/#EXTM3U/i.test(body) || /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(body)) {
+          const variants = bestM3u8Variants(body, url);
+          if (variants.length) variants.forEach((v) => found.push(v));
+          else {
+            const urls = body.match(/(https?:\/\/[^"'<>\s\\]+\.(?:mp4|m3u8|webm)(?:\?[^"'<>\s\\]*)?)/gi);
+            if (urls) urls.forEach((u) => found.push(u));
+          }
+        }
+      } catch (e) {}
+    }
+  }
+  return unique(found);
+}
+
+async function extractVideoFromScripts(html, referer, baseUrl, params) {
+  const found = [];
+  const scriptBlocks = [];
+  const scriptRe = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = scriptRe.exec(html))) scriptBlocks.push(m[1]);
+
+  const jsonRe = /["'](https?:\/\/[^"']+\.(?:mp4|m3u8|webm)[^"']*)["']/gi;
+  const pathRe = /["']((?:\/\/|\/)[^"'\s]{5,}\.(?:mp4|m3u8|webm)[^"'\s]*)["']/gi;
+  const apiRe = /["'](https?:\/\/[^"']*(?:api|ajax|video|source|stream|file|data|json|playlist|embed|player)[^"']*)["']/gi;
+  for (const block of scriptBlocks) {
+    let match;
+    jsonRe.lastIndex = 0;
+    while ((match = jsonRe.exec(block))) {
+      const url = absolutize(match[1], baseUrl);
+      if (url && isPlayableCandidate(url) && !isPreviewUrl(url)) found.push(url);
+    }
+    pathRe.lastIndex = 0;
+    while ((match = pathRe.exec(block))) {
+      const url = absolutize(match[1], baseUrl);
+      if (url && isPlayableCandidate(url) && !isPreviewUrl(url)) found.push(url);
+    }
+    apiRe.lastIndex = 0;
+    while ((match = apiRe.exec(block))) {
+      const url = absolutize(match[1], baseUrl);
+      if (url && shouldProbePlayableUrl(url) && !isPreviewUrl(url)) {
+        try {
+          const res = await Widget.http.get(url, { headers: buildHeaders(params, referer) });
+          const body = String((res && res.data) || "");
+          if (/#EXTM3U/i.test(body)) {
+            const variants = bestM3u8Variants(body, url);
+            variants.forEach((v) => found.push(v));
+          } else {
+            const nested = extractMediaCandidates(body, url);
+            nested.forEach((c) => found.push(c.url));
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  const ldJsonRe = /<script[^>]*type=(["'])application\/ld\+json\1[^>]*>([\s\S]*?)<\/script>/gi;
+  while ((m = ldJsonRe.exec(html))) {
+    try {
+      const json = JSON.parse(m[2]);
+      const extractUrls = (obj) => {
+        if (!obj || typeof obj !== "object") return;
+        if (typeof obj === "string" && /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(obj) && !isPreviewUrl(obj)) {
+          found.push(absolutize(obj, baseUrl));
+        } else if (typeof obj === "string" && shouldProbePlayableUrl(obj) && !isPreviewUrl(obj)) {
+          found.push(absolutize(obj, baseUrl));
+        } else if (Array.isArray(obj)) {
+          obj.forEach(extractUrls);
+        } else {
+          Object.values(obj).forEach(extractUrls);
+        }
+      };
+      extractUrls(json);
+    } catch (e) {}
+  }
+  return unique(found);
 }
 
 async function fetchPageWithReferer(url, params = {}, referer) {
@@ -379,16 +537,71 @@ function extractMediaCandidates(html, baseUrl) {
   collectMediaMatches(candidates, searchable, /\b(?:var\s+)?hlsUrl\s*=\s*(["'])(.*?)\1/gi, baseUrl, "hlsUrl", 2);
   collectMediaMatches(candidates, searchable, /<(?:source|video)\b[^>]*src=(["'])(.*?)\1/gi, baseUrl, "source", 2);
   collectMediaMatches(candidates, searchable, /<meta\b[^>]*(?:property|name)=(["'])(?:og:video|og:video:url|twitter:player:stream|video)\1[^>]*content=(["'])(.*?)\2/gi, baseUrl, "meta", 3);
-  collectMediaMatches(candidates, searchable, /\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2);
+  collectMediaMatches(candidates, searchable, /\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|data-source|data-stream|file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2);
+  collectMediaMatches(candidates, searchable, /<(?:video|source|audio|track|embed|object|iframe)\b[^>]*\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|data-source|data-stream|data-full|data-main|data-original|src|poster|href|data)=(["'])([^"']+)\1/gi, baseUrl, "data-attr", 2);
+  collectMediaMatches(candidates, searchable, /\bstyle\s*=\s*(["'])[^"']*url\s*\(\s*\\?\s*'(https?:\/\/[^']+\.(?:mp4|m3u8|webm)[^']*)\\?\s*\)/gi, baseUrl, "css-url", 2);
   collectMediaMatches(candidates, searchable, /\b(?:file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*([^"',}\]\s<>]+)/gi, baseUrl, "script", 1);
+  collectMediaMatches(candidates, searchable, /\b(?:full_video|fullVideo|full_video_url|fullVideoUrl|main_video|mainVideo|movie_url|movieUrl|content_url|contentUrl|media_url|mediaUrl|play_url|playUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "full-video", 2);
+  collectMediaMatches(candidates, searchable, /\b(?:full_video|fullVideo|full_video_url|fullVideoUrl|main_video|mainVideo|movie_url|movieUrl|content_url|contentUrl|media_url|mediaUrl|play_url|playUrl)\s*[:=]\s*([^"',}\]\s<>]+)/gi, baseUrl, "full-video", 1);
+  collectMediaMatches(candidates, searchable, /(?:loadVideo|loadSource|setSource|changeSource|switchSource|playVideo)\s*\(\s*(["'])([^"']+)\1/gi, baseUrl, "js-func", 2);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\.(?:m3u8|mp4|webm)(?:\?[^"'<>\s\\]*)?)/gi, baseUrl, "url", 1);
-  collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player|v\.php|source|file)[^"'<>\s\\]*)/gi, baseUrl, "url", 1);
+  collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player|v\.php|source|file|watch|view|play)[^"'<>\s\\]*)/gi, baseUrl, "url", 1);
+  collectMediaMatches(candidates, searchable, /<a\b[^>]*\bhref=(["'])([^"']*(?:download|watch|play|stream|video|source|file)[^"']*)["'][^>]*>/gi, baseUrl, "download-link", 2);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/wp-admin\/admin-ajax\.php\?[^"'<>\s\\]+)/gi, baseUrl, "ajax", 1);
   collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\.(?:m3u8|mp4|webm)(?:\?[^"']*)?)\1/gi, baseUrl, "relative", 2);
   collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player|v\.php|source|file)[^"']*)\1/gi, baseUrl, "relative", 2);
   collectMediaMatches(candidates, searchable, /(["'])((?:\/\/|\/)[^"']+\/wp-admin\/admin-ajax\.php\?[^"']*)\1/gi, baseUrl, "ajax", 2);
+  parsePlayerSourceObjects(searchable, baseUrl).forEach((url) => candidates.push({ url, source: "player-obj" }));
   buildAjaxCandidates(searchable, baseUrl).forEach((url) => candidates.push({ url, source: "ajax" }));
   return uniqueCandidates(candidates).filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url));
+}
+
+function parsePlayerSourceObjects(text, baseUrl) {
+  const out = [];
+  const patterns = [
+    /\b(?:sources|sources_alt|file_src|videoSources|playSources)\s*[:=]\s*(\[[\s\S]*?\]|\{[\s\S]*?\})/gi,
+    /(?:jwplayer|flowplayer|Playerjs|videojs)\s*\([^)]*\)\s*\.\s*(?:load|source|setup|play)\s*\(\s*(\[[\s\S]*?\]|\{[\s\S]*?\})/gi,
+    /\bplayerInstance\s*\.\s*(?:load|source|setup|play)\s*\(\s*(\[[\s\S]*?\]|\{[\s\S]*?\})/gi,
+  ];
+  for (const re of patterns) {
+    let match;
+    re.lastIndex = 0;
+    while ((match = re.exec(text || ""))) {
+      try {
+        let obj = match[1].replace(/(['"])?([a-zA-Z0-9_\-]+)\s*:/g, '"$2":');
+        obj = obj.replace(/'/g, '"');
+        obj = obj.replace(/,\s*([}\]])/g, "$1");
+        const parsed = JSON.parse(obj);
+        extractUrlsFromPlayerObject(parsed, baseUrl, out);
+      } catch (e) {
+        const urlRe = /["'](https?:\/\/[^"']+\.(?:mp4|m3u8|webm)[^"']*)["']/g;
+        let urlMatch;
+        while ((urlMatch = urlRe.exec(match[1]))) {
+          const url = absolutize(urlMatch[1], baseUrl);
+          if (url && isPlayableCandidate(url) && !isPreviewUrl(url)) out.push(url);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function extractUrlsFromPlayerObject(obj, baseUrl, out) {
+  if (!obj || typeof obj !== "object") return;
+  if (Array.isArray(obj)) {
+    obj.forEach((item) => extractUrlsFromPlayerObject(item, baseUrl, out));
+    return;
+  }
+  const maybeUrl = obj.file || obj.src || obj.url || obj.source || obj.stream;
+  if (typeof maybeUrl === "string") {
+    const url = absolutize(maybeUrl, baseUrl);
+    if (url && isPlayableCandidate(url) && !isPreviewUrl(url)) out.push(url);
+  }
+  const sources = obj.sources || obj.tracks || obj.files;
+  if (sources) extractUrlsFromPlayerObject(sources, baseUrl, out);
+  Object.values(obj).forEach((v) => {
+    if (v && typeof v === "object") extractUrlsFromPlayerObject(v, baseUrl, out);
+  });
 }
 
 function buildAjaxCandidates(text, baseUrl) {
@@ -418,11 +631,21 @@ function collectMediaUrl(out, rawUrl, baseUrl, source) {
 function extractIframeUrls(html, baseUrl) {
   const normalized = normalizeEscapedText(html);
   const out = [];
-  const re = /<iframe\b[^>]*src=(["'])(.*?)\1/gi;
-  let match;
-  while ((match = re.exec(normalized))) {
-    const url = absolutize(match[2], baseUrl);
-    if (url) out.push(url);
+  const patterns = [
+    /<iframe\b[^>]*src=(["'])(.*?)\1/gi,
+    /<iframe\b[^>]*data-src=(["'])(.*?)\1/gi,
+    /<iframe\b[^>]*data-lazy-src=(["'])(.*?)\1/gi,
+    /<iframe\b[^>]*data-url=(["'])(.*?)\1/gi,
+    /<embed\b[^>]*src=(["'])(.*?)\1/gi,
+    /<object\b[^>]*data=(["'])(.*?)\1/gi,
+  ];
+  for (const re of patterns) {
+    let match;
+    re.lastIndex = 0;
+    while ((match = re.exec(normalized))) {
+      const url = absolutize(match[2], baseUrl);
+      if (url) out.push(url);
+    }
   }
   return unique(out);
 }
@@ -435,16 +658,13 @@ async function resolveBestPlayableVariant(url, referer, params = {}) {
 async function resolvePlayableVariants(url, referer, params = {}) {
   if (!shouldProbePlayableUrl(url)) return [url];
   try {
-    const res = await Widget.http.get(url, {
-      headers: buildHeaders(params, referer),
-    });
-    const body = String((res && res.data) || "");
-    if (/#EXTM3U/i.test(body)) {
-      const variants = bestM3u8Variants(body, url);
+    const probed = await probeUrl(url, referer, params);
+    if (/#EXTM3U/i.test(probed)) {
+      const variants = bestM3u8Variants(probed, url);
       return variants.length ? variants : [url];
     }
     if (shouldProbeNestedPlayer(url)) {
-      const nested = extractMediaCandidates(body, url)
+      const nested = extractMediaCandidates(probed, url)
         .filter((candidate) => stripQuery(candidate.url) !== stripQuery(url))
         .sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
       const expanded = [];
@@ -452,7 +672,19 @@ async function resolvePlayableVariants(url, referer, params = {}) {
         const variants = await resolvePlayableVariants(candidate.url, url, params);
         variants.forEach((variant) => expanded.push(variant));
       }
-      return unique(expanded).length ? unique(expanded) : [];
+      if (unique(expanded).length) return unique(expanded);
+      const postProbed = await probeUrl(url, referer, params, true);
+      if (postProbed !== probed) {
+        const retry = extractMediaCandidates(postProbed, url)
+          .filter((candidate) => stripQuery(candidate.url) !== stripQuery(url))
+          .sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
+        for (const candidate of retry.slice(0, 8)) {
+          const variants = await resolvePlayableVariants(candidate.url, url, params);
+          variants.forEach((variant) => expanded.push(variant));
+        }
+        if (unique(expanded).length) return unique(expanded);
+      }
+      return [];
     }
     return [url];
   } catch (error) {
@@ -461,10 +693,23 @@ async function resolvePlayableVariants(url, referer, params = {}) {
   }
 }
 
+async function probeUrl(url, referer, params, usePost = false) {
+  const headers = buildHeaders(params, referer);
+  try {
+    const res = usePost
+      ? await Widget.http.post(url, {}, { headers })
+      : await Widget.http.get(url, { headers });
+    return String((res && res.data) || "");
+  } catch (e) {
+    return "";
+  }
+}
+
 function shouldProbePlayableUrl(url) {
-  return /\.m3u8(?:[?#]|$)/i.test(url) ||
-    /\/(?:get_file|stream|hls|playlist|master)(?:[\/?#]|$)/i.test(String(url || "")) ||
-    shouldProbeNestedPlayer(url);
+  const value = String(url || "");
+  return /\.m3u8(?:[?#]|$)/i.test(value) ||
+    /\/(?:get_file|stream|hls|playlist|master|v\.php|source|file|video|embed|player)(?:[\/?#]|$)/i.test(value) ||
+    shouldProbeNestedPlayer(value);
 }
 
 function shouldProbeNestedPlayer(url) {
@@ -526,6 +771,7 @@ function playbackName(url, index) {
   const res = resolutionScore(url);
   if (res) return `${res}P 正片`;
   if (/\.m3u8(?:[?#]|$)/i.test(url)) return index === 0 ? "自适应正片" : "备用正片";
+  if (/\.mp4(?:[?#]|$)/i.test(url)) return index === 0 ? "正片 MP4" : `备用 MP4 ${index + 1}`;
   return index === 0 ? "正片" : `备用正片 ${index + 1}`;
 }
 
