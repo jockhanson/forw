@@ -2,15 +2,16 @@
 WidgetMetadata = {
   id: "jable_int",
   title: "Jable",
-  description: "修复声音&恢复大量分类",
-  author: "nibiru｜MakkaPakka｜蝴蝶",
-  site: "https://widgets-xd.vercel.app",
-  version: "1.3.0",
+  description: "Jable分类浏览.全局搜索.标签.女优.预告.推荐.聚合",
+  author: "nibiru｜MakkaPakka｜廿二日",
+  site: "https://jable.tv",
+  version: "2.5.0",
   requiredVersion: "0.0.2",
   detailCacheDuration: 60,
   modules: [
     // \u641c\u7d22\u6a21\u5757
     {
+      id: "search",
       title: "\u641c\u7d22",
       description: "\u641c\u7d22",
       requiresWebView: false,
@@ -29,6 +30,7 @@ WidgetMetadata = {
           type: "enumeration",
           description: "\u6392\u5e8f",
           enumOptions: [
+            { title: "\u6700\u9ad8\u76f8\u5173", value: "" },
             { title: "\u6700\u591a\u89c2\u770b", value: "video_viewed" },
             { title: "\u8fd1\u671f\u6700\u4f73", value: "post_date_and_popularity" },
             { title: "\u6700\u8fd1\u66f4\u65b0", value: "post_date" },
@@ -40,6 +42,7 @@ WidgetMetadata = {
     },
     // \u70ed\u95e8\u6a21\u5757
     {
+      id: "hot",
       title: "\u70ed\u95e8",
       description: "\u70ed\u95e8\u5f71\u7247",
       requiresWebView: false,
@@ -70,6 +73,7 @@ WidgetMetadata = {
     },
     // \u6700\u65b0\u6a21\u5757
     {
+      id: "newRelease",
       title: "\u6700\u65b0",
       description: "\u6700\u65b0\u4e0a\u5e02\u5f71\u7247",
       requiresWebView: false,
@@ -100,6 +104,7 @@ WidgetMetadata = {
 
     // \u4e2d\u6587\u6a21\u5757
     {
+      id: "chinese",
       title: "\u4e2d\u6587",
       description: "\u4e2d\u6587\u5b57\u5e55\u5f71\u7247",
       requiresWebView: false,
@@ -129,6 +134,7 @@ WidgetMetadata = {
     },
     // \u5973\u4f18\u6a21\u5757
     {
+      id: "models",
       title: "\u5973\u4f18",
       description: "\u6309\u5973\u4f18\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -412,6 +418,7 @@ WidgetMetadata = {
 
     // \u8863\u7740\u6a21\u5757
     {
+      id: "outfit",
       title: "\u8863\u7740",
       description: "\u6309\u8863\u7740\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -510,6 +517,7 @@ WidgetMetadata = {
     },
     // \u5267\u60c5\u6a21\u5757
     {
+      id: "plot",
       title: "\u5267\u60c5",
       description: "\u6309\u5267\u60c5\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -555,7 +563,7 @@ WidgetMetadata = {
             },
             { 
               title: "\u50ac\u7720", 
-              value: "https://jable.tv/tags/hypnosis//?mode=async&function=get_block&block_id=list_videos_common_videos_list"
+              value: "https://jable.tv/tags/hypnosis/?mode=async&function=get_block&block_id=list_videos_common_videos_list"
             },
             { 
               title: "\u5077\u62cd", 
@@ -596,6 +604,7 @@ WidgetMetadata = {
     },
     // \u5730\u70b9\u6a21\u5757
     {
+      id: "location",
       title: "\u5730\u70b9",
       description: "\u6309\u5730\u70b9\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -682,6 +691,7 @@ WidgetMetadata = {
     },
     // \u8eab\u6750\u6a21\u5757
     {
+      id: "body",
       title: "\u8eab\u6750",
       description: "\u6309\u8eab\u6750\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -764,6 +774,7 @@ WidgetMetadata = {
     },    
     // \u89d2\u8272\u6a21\u5757
     {
+      id: "role",
       title: "\u89d2\u8272",
       description: "\u6309\u89d2\u8272\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -854,6 +865,7 @@ WidgetMetadata = {
     },
     // \u4ea4\u5408\u6a21\u5757
     {
+      id: "acts",
       title: "\u4ea4\u5408",
       description: "\u6309\u4ea4\u5408\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -928,6 +940,7 @@ WidgetMetadata = {
     },
     // \u73a9\u6cd5\u6a21\u5757
     {
+      id: "play",
       title: "\u73a9\u6cd5",
       description: "\u6309\u73a9\u6cd5\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -1022,6 +1035,7 @@ WidgetMetadata = {
     },    
     // \u4e3b\u9898\u6a21\u5757
     {
+      id: "theme",
       title: "\u4e3b\u9898",
       description: "\u6309\u4e3b\u9898\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -1098,8 +1112,22 @@ WidgetMetadata = {
         { name: "from", title: "\u9875\u7801", type: "page", description: "\u9875\u7801", value: "1" },
       ],
     },
+    /* Temporarily disabled
+    // \u914d\u6d41\u6a21\u5757
+    {
+      id: "loadResource",
+      title: "Jable \u64ad\u653e\u6e90",
+      description: "\u901a\u8fc7\u756a\u53f7\u5339\u914d Jable \u64ad\u653e\u6e90",
+      requiresWebView: false,
+      functionName: "loadResource",
+      type: "stream",
+      cacheDuration: 600,
+      params: []
+    },
+    */
     // \u6742\u9879\u6a21\u5757
     {
+      id: "misc",
       title: "\u6742\u9879",
       description: "\u6309\u6742\u9879\u5206\u7c7b\u6d4f\u89c8\u5f71\u7247",
       requiresWebView: false,
@@ -1156,23 +1184,81 @@ WidgetMetadata = {
         { name: "from", title: "\u9875\u7801", type: "page", description: "\u9875\u7801", value: "1" },
       ],
     },
+
+    // \u6700\u8fd1\u66f4\u65b0\u6a21\u5757
+    {
+      id: "latest",
+      title: "\u6700\u8fd1\u66f4\u65b0",
+      description: "\u6700\u8fd1\u66f4\u65b0\u5f71\u7247",
+      requiresWebView: false,
+      functionName: "loadPage",
+      cacheDuration: 3600,
+      params: [
+        {
+          name: "url",
+          title: "\u5217\u8868\u5730\u5740",
+          type: "constant",
+          description: "\u5217\u8868\u5730\u5740",
+          value: "https://jable.tv/latest-updates/?mode=async&function=get_block&block_id=list_videos_latest_videos_list",
+        },
+        { name: "from", title: "\u9875\u7801", type: "page", description: "\u9875\u7801", value: "1" },
+      ],
+    },
   ],
+  search: {
+    title: "全局搜索",
+    functionName: "searchGlobal",
+    params: [
+      { name: "keyword", title: "关键词", type: "input", description: "关键词", value: "" },
+      { name: "from", title: "页码", type: "page", description: "页码", value: "1" },
+    ],
+  },
 };
 
 
+const BASE_URL = "https://jable.tv";
+
+function normalizeUrl(href) {
+  if (!href) return "";
+  if (href.startsWith("http")) return href;
+  if (href.startsWith("/")) return BASE_URL + href;
+  return BASE_URL + "/" + href;
+}
+
+function safeText(str) {
+  return (str || "").replace(/\s+/g, " ").trim();
+}
+
 async function search(params = {}) {
-  const keyword = encodeURIComponent(params.keyword || "");
-  
-  let url = `https://jable.tv/search/${keyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${keyword}`;
-  
-  if (params.sort_by) {
-    url += `&sort_by=${params.sort_by}`;
+  const keyword = (params.keyword || "").trim();
+  if (!keyword) {
+    return [{
+      id: "tip",
+      type: "text",
+      title: "请输入关键词开始搜索"
+    }];
   }
-  
-  if (params.from) {
-    url += `&from=${params.from}`;
+
+  return await searchByKeyword(keyword, params);
+}
+
+async function searchGlobal(params = {}) {
+  const keyword = (params.keyword || "").trim();
+  if (!keyword) {
+    return [{
+      id: "tip",
+      type: "text",
+      title: "请输入关键词开始全局搜索"
+    }];
   }
-  
+
+  return await searchByKeyword(keyword, params);
+}
+
+async function searchByKeyword(keyword, params = {}) {
+  const encodedKeyword = encodeURIComponent(keyword);
+  const url = `https://jable.tv/search/${encodedKeyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${encodedKeyword}`;
+
   return await loadPage({ ...params, url });
 }
 
@@ -1184,7 +1270,10 @@ async function loadPage(params = {}) {
 
 async function loadPageSections(params = {}) {
   try {
-    let url = params.url;
+    const jumpId = params.genreId || params.peopleId;
+    let url = jumpId
+      ? jumpId + (jumpId.includes("?") ? "" : "?mode=async&function=get_block&block_id=list_videos_common_videos_list")
+      : params.url;
     if (!url) {
       throw new Error("\u5730\u5740\u4e0d\u80fd\u4e3a\u7a7a");
     }
@@ -1209,14 +1298,13 @@ async function loadPageSections(params = {}) {
 
     const htmlContent = response.data;
 
-    return parseHtml(htmlContent);
+    return parseHtml(htmlContent, params);
   } catch (error) {
-    console.error("\u6d4b\u8bd5\u8fc7\u7a0b\u51fa\u9519:", error.message);
     throw error;
   }
 }
 
-async function parseHtml(htmlContent) {
+async function parseHtml(htmlContent, options = {}) {
   const $ = Widget.html.load(htmlContent);
   const sectionSelector = ".site-content .py-3,.pb-e-lg-40";
   const itemSelector = ".video-img-box";
@@ -1226,45 +1314,61 @@ async function parseHtml(htmlContent) {
 
   let sections = [];
   const sectionElements = $(sectionSelector).toArray();
-  
+
   for (const sectionElement of sectionElements) {
     const $sectionElement = $(sectionElement);
-    var items = [];
+    const items = [];
     const sectionTitle = $sectionElement.find(".title-box .h3-md").first();
     const sectionTitleText = sectionTitle.text();
     const itemElements = $sectionElement.find(itemSelector).toArray();
-    
+
     if (itemElements && itemElements.length > 0) {
       for (const itemElement of itemElements) {
         const $itemElement = $(itemElement);
         const titleId = $itemElement.find(titleSelector).first();
         const url = titleId.attr("href") || "";
-        
+
         if (url && url.includes("jable.tv")) {
           const durationId = $itemElement.find(durationSelector).first();
           const coverId = $itemElement.find(coverSelector).first();
-          const cover = coverId.attr("data-src");
+          const cover = coverId.attr("data-src") || coverId.attr("src") || "";
           const video = coverId.attr("data-preview");
           const title = titleId.text();
           const duration = durationId.text().trim();
-          
+          const dvdId = extractDvdId(url);
+          const hdCovers = buildCoverUrlsFromVideoId(dvdId);
+          let hdPoster = hdCovers.posterUrl || cover;
+          let hdBackdrop = hdCovers.backdropUrl || cover;
+
+          if (dvdId && /^(DLDSS|SDNT|SABA|DTT|VDD|NMSL|CLOT|FIT|RCTD)/i.test(dvdId) && (hdCovers.posterUrl || hdCovers.backdropUrl)) {
+            const verified = await verifyCoverUrl(hdCovers.posterUrl || hdCovers.backdropUrl);
+            if (!verified) {
+              hdPoster = cover;
+              hdBackdrop = cover;
+            }
+          }
+
           const item = {
             id: url,
             type: "url",
             title: title,
-            backdropPath: cover,
+            backdropPath: hdBackdrop,
+            posterPath: hdPoster,
             previewUrl: video,
             link: url,
             mediaType: "movie",
-            description: "",
+            description: dvdId ? `番号: ${dvdId}` : "",
             releaseDate: duration,
+            coverUrl: hdBackdrop,
+            image: hdBackdrop,
+            detailPoster: hdPoster,
             playerType: "system"
           };
           items.push(item);
         }
       }
     }
-    
+
     if (items.length > 0) {
       sections.push({
         title: sectionTitleText,
@@ -1272,7 +1376,7 @@ async function parseHtml(htmlContent) {
       });
     }
   }
-  
+
   return sections;
 }
 
@@ -1283,38 +1387,777 @@ async function loadDetail(link) {
       "Referer": "https://jable.tv/"
     },
   });
-  
-  // 优化了正则匹配，防止报错
-  let hlsUrl = "";
-  const match = response.data.match(/var\s+hlsUrl\s*=\s*['"](.*?)['"]/i);
-  if (match && match[1]) {
-    hlsUrl = match[1];
-  }
 
-  if (!hlsUrl) {
+  const htmlContent = response.data || "";
+  const $ = Widget.html.load(htmlContent);
+
+  const match = htmlContent.match(/var\s+hlsUrl\s*=\s*['"](.*?)['"]/i);
+  const playbackUrl = match && match[1] ? (match[1].startsWith("//") ? `https:${match[1]}` : match[1]) : "";
+
+  if (!playbackUrl) {
     throw new Error("无法获取有效的播放地址，可能需要代理验证");
   }
-  
-  const $ = Widget.html.load(response.data);
-  let videoDuration = null;
-  const durationElements = $('.absolute-bottom-right .label, .duration, [class*="duration"]');
-  if (durationElements.length > 0) {
-    videoDuration = durationElements.first().text().trim();
+
+  const dvdId = extractDvdId(link);
+  const hdCovers = buildCoverUrlsFromVideoId(dvdId);
+  const jableCover = $('meta[property="og:image"]').attr("content") || $('meta[name="twitter:image"]').attr("content") || "";
+
+  let detailPosterCover = hdCovers.posterUrl || jableCover;
+  let detailBackdropCover = hdCovers.backdropUrl || jableCover || detailPosterCover;
+
+  const [jtMeta, trailerUrl] = await Promise.all([
+    (dvdId ? fetchJavTrailersMeta(dvdId).catch(() => ({ backdropPath: "", backdropPaths: [] })) : Promise.resolve({ backdropPath: "", backdropPaths: [] }))
+      .then(meta => {
+        if (dvdId && /^(ABF|ABP|ABW)/i.test(dvdId) && meta.backdropPaths?.length) {
+          return Promise.all(meta.backdropPaths.map(url => verifyCoverUrl(url))).then(results => {
+            meta.backdropPaths = meta.backdropPaths.filter((_, i) => results[i]);
+            return meta;
+          });
+        }
+        return meta;
+      }),
+    dvdId ? buildJavTrailersUrl(dvdId).catch(() => "") : Promise.resolve(""),
+    (dvdId && /^(DLDSS|SDNT|SABA|DTT|VDD|NMSL|CLOT|FIT|RCTD)/i.test(dvdId) && (hdCovers.posterUrl || hdCovers.backdropUrl))
+      ? verifyCoverUrl(hdCovers.posterUrl || hdCovers.backdropUrl).then(verified => {
+          if (!verified) { detailPosterCover = jableCover; detailBackdropCover = jableCover; }
+        })
+      : Promise.resolve(),
+  ]);
+
+  const trailers = [];
+  if (trailerUrl) {
+    const tc = buildTrailerCoverUrl(dvdId) || detailBackdropCover;
+    trailers.push({ coverUrl: tc, posterPath: tc, backdropPath: tc, image: tc, url: trailerUrl });
   }
-  
+
+  const title = safeText($("section.video-info h4").first().text())
+    || safeText($('meta[property="og:title"]').attr("content"))
+    || "未知标题";
+
+  const description = safeText($("h5.desc").first().text()) || undefined;
+
+  const genreItems = [];
+  $("h5.tags a.cat").each((_, el) => {
+    const $a = $(el);
+    const href = normalizeUrl($a.attr("href") || "");
+    const text = safeText($a.text());
+    if (!text || !href) return;
+    genreItems.push({ id: href, title: text });
+  });
+
+  const tagItems = [];
+  $("h5.tags a:not(.cat)").each((_, el) => {
+    const $a = $(el);
+    const href = normalizeUrl($a.attr("href") || "");
+    if (!href.includes("jable.tv")) return;
+    const text = safeText($a.text());
+    if (!text || text === "•") return;
+    tagItems.push({ id: href, title: text });
+  });
+
+  const allGenres = [...genreItems, ...tagItems];
+
+  const peoples = [];
+  const seenPeoples = new Set();
+  $("div.models a.model").each((_, el) => {
+    const $a = $(el);
+    const modelHref = normalizeUrl($a.attr("href") || "");
+    const $span = $a.find("span").first();
+    const name = safeText(
+      $span.attr("data-original-title")
+      || $span.attr("data-originaltitle")
+      || $span.attr("title")
+      || $a.attr("data-original-title")
+      || $a.find("span[data-original-title]").attr("data-original-title")
+    );
+    if (!name || seenPeoples.has(name)) return;
+    seenPeoples.add(name);
+    peoples.push({
+      id: modelHref || name,
+      title: name,
+      avatar: "https://iili.io/KtHNnQS.png",
+    });
+  });
+
+  const relatedItems = [];
+  const seenRelated = new Set([link]);
+  $("div.video-img-box").each((_, el) => {
+    if (relatedItems.length >= 12) return false;
+    const $item = $(el);
+    const $a = $item.find("div.img-box a").first();
+    const recHref = $a.attr("href") || "";
+    const recLink = normalizeUrl(recHref);
+    if (!recLink || seenRelated.has(recLink) || !recLink.includes("jable.tv/videos/")) return;
+    seenRelated.add(recLink);
+
+    const $img = $item.find("img").first();
+    const recCover = $img.attr("data-src") || "";
+    const recTitle = safeText($item.find("h6.title a").first().text()) || safeText($img.attr("alt")) || "相关视频";
+    const recDuration = safeText($item.find(".absolute-bottom-right .label").first().text()) || undefined;
+
+    const $subTitle = $item.find("p.sub-title");
+    const subNodes = [];
+    $subTitle.contents().each((_, node) => {
+      if (node.type === "text") {
+        const t = node.data.replace(/\s+/g, "");
+        if (t) subNodes.push(t);
+      }
+    });
+    const recViews = subNodes[0] || undefined;
+
+    const descParts = [];
+    if (recDuration) descParts.push(`时长: ${recDuration}`);
+    if (recViews)    descParts.push(`观看: ${recViews}`);
+
+    const itemCover = recCover || detailPosterCover || jableCover;
+    relatedItems.push({
+      id: recLink,
+      type: "url",
+      title: recTitle,
+      backdropPath: itemCover || undefined,
+      posterPath: itemCover || undefined,
+      durationText: recDuration,
+      description: descParts.length ? descParts.join(" | ") : undefined,
+      mediaType: "movie",
+      link: recLink,
+    });
+  });
+
   const item = {
     id: link,
     type: "detail",
-    videoUrl: hlsUrl,
-    // 👉 核心修复：强制使用 ijk 播放器解决无声问题
-    playerType: "ijk", 
-    // 👉 核心修复：添加防盗链头部
+    title,
+    description,
+    videoUrl: playbackUrl,
+    playerType: "ijk",
     customHeaders: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
       "Referer": link,
       "Origin": "https://jable.tv"
-    }
+    },
+    coverUrl: detailPosterCover,
+    posterPath: detailPosterCover,
+    detailPoster: detailBackdropCover,
+    backdropPath: detailBackdropCover,
+    image: detailBackdropCover,
+    backdropPaths: [jtMeta.backdropPath, ...(jtMeta.backdropPaths || [])].filter(Boolean),
+    genreItems: allGenres.length > 0 ? allGenres : undefined,
+    peoples: peoples.length > 0 ? peoples : undefined,
+    relatedItems,
+    trailers: trailers,
+    previewUrl: trailerUrl || ""
   };
-  
+
   return item;
 }
+
+// ==================== HD Cover Generation, JavTrailers Gallery, and Trailer (adapted from MissAV 3.0) ====================
+
+const JAVTRAILERS_URL_CACHE = {};
+const JAVTRAILERS_URL_PROMISE_CACHE = {};
+const JAVTRAILERS_FETCH_TIMEOUT_MS = 1200;
+const JAVTRAILERS_MGSTAGE_PREFIXES = new Set(["ABF", "ABW", "JUFE", "MAAN", "PPT", "SIRO", "LUXU", "GANA", "ABP", "CHN"]);
+const JAVTRAILERS_GALLERY_BASE_URL = "https://javtrailers.com";
+const JAVTRAILERS_GALLERY_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+  "Referer": "https://javtrailers.com/",
+  "Connection": "keep-alive"
+};
+
+async function verifyCoverUrl(url) {
+  if (!url) return "";
+  try {
+    const resp = await Widget.http.get(url, { timeout: 3000 });
+    const data = resp?.data;
+    if (!data) return "";
+    if (typeof data === "string" && data.length < 15360) return "";
+    return url;
+  } catch (e) {
+    return "";
+  }
+}
+
+function buildCoverUrlsFromVideoId(videoIdOrTitle) {
+  const candidates = buildCoverCandidatesFromVideoId(videoIdOrTitle);
+  return {
+    posterUrl: candidates.posterCandidates[0] || "",
+    backdropUrl: candidates.backdropCandidates[0] || "",
+    posterCandidates: candidates.posterCandidates,
+    backdropCandidates: candidates.backdropCandidates,
+  };
+}
+
+const MGSTAGE_COVER_RULES = {
+  ABF: { maker: "prestige" }, ABW: { maker: "prestige" }, ABP: { maker: "prestige" },
+  CHN: { maker: "prestige" }, JUFE: { maker: "prestige" }, MAAN: { maker: "prestige" },
+  PPT: { maker: "prestige" }, "390JAC": { maker: "jackson" }
+};
+
+function parseJavCodeParts(title) {
+  const raw = String(title || "").toUpperCase();
+  const match = raw.match(/\b([A-Z0-9]+)-?(\d{2,5})\b/);
+  if (!match) return null;
+  const prefix = match[1];
+  const prefixLower = prefix.toLowerCase();
+  const number5 = match[2].padStart(5, "0");
+  const numMap = {
+    WSA: "2",
+    FSDSS: "1", FCDSS: "1", FNS: "1", FTHTD: "1",
+    FALENO: "1", FGAN: "1", FSNF: "1", FLAV: "1",
+    ABP: "118", CHN: "118",
+    STARS: "1", STAR: "1", START: "1",
+    SODS: "1",
+    REBD: "h_346", REBDB: "h_346", GSHRB: "h_346"
+  };
+  return {
+    prefix, prefixLower,
+    number: match[2],
+    number3: match[2].padStart(3, "0"),
+    number5,
+    code: `${numMap[prefix] || ""}${prefixLower}${number5}`,
+    plainCode: `${prefixLower}${number5}`
+  };
+}
+
+function buildMgstageCoverCandidatesFromParts(parts, rule) {
+  if (!parts || !rule || !rule.maker) return { posterCandidates: [], backdropCandidates: [] };
+  const prefixLower = parts.prefixLower;
+  const number = String(parseInt(parts.number, 10));
+  if (!prefixLower || !number || number === "NaN") return { posterCandidates: [], backdropCandidates: [] };
+  const dvdDash = `${prefixLower}-${number}`;
+  const base = `https://image.mgstage.com/images/${rule.maker}/${prefixLower}/${number}`;
+  return {
+    posterCandidates: compactUniqueUrls([`${base}/pf_e_${dvdDash}.jpg`, `${base}/pf_o1_${dvdDash}.jpg`]),
+    backdropCandidates: compactUniqueUrls([`${base}/pb_e_${dvdDash}.jpg`])
+  };
+}
+
+function buildDmmCoverCandidatesFromParts(parts) {
+  if (!parts) return { posterCandidates: [], backdropCandidates: [] };
+  const contentId = String(parts.code || "").toLowerCase().trim();
+  if (!contentId) return { posterCandidates: [], backdropCandidates: [] };
+  const awsBase = `https://awsimgsrc.dmm.co.jp/pics_dig/digital/video/${contentId}`;
+  const picsBase = `https://pics.dmm.co.jp/digital/video/${contentId}`;
+  return {
+    posterCandidates: compactUniqueUrls([`${awsBase}/${contentId}ps.jpg`, `${picsBase}/${contentId}ps.jpg`]),
+    backdropCandidates: compactUniqueUrls([`${awsBase}/${contentId}pl.jpg`, `${picsBase}/${contentId}pl.jpg`])
+  };
+}
+
+function buildCoverCandidatesFromVideoId(videoIdOrTitle) {
+  const parts = parseJavCodeParts(videoIdOrTitle);
+  if (!parts) return { posterCandidates: [], backdropCandidates: [] };
+  const rule = MGSTAGE_COVER_RULES[parts.prefix];
+  if (rule) return buildMgstageCoverCandidatesFromParts(parts, rule);
+  return buildDmmCoverCandidatesFromParts(parts);
+}
+
+function compactUniqueUrls(urls) {
+  const seen = new Set();
+  return (urls || []).filter(u => { const c = String(u || "").trim(); if (!c || seen.has(c)) return false; seen.add(c); return true; });
+}
+
+// ---- Trailer URL functions ----
+
+function buildJavTrailersFallbackUrl(title) {
+  const parts = parseJavCodeParts(title);
+  if (!parts) return "";
+  const first = parts.code[0];
+  const folder = parts.code.slice(0, 3);
+  return `https://media.javtrailers.com/hlsvideo/freepv/${first}/${folder}/${parts.code}/playlist.m3u8`;
+}
+
+function isJavTrailersMgstageTitle(title) {
+  const parts = parseJavCodeParts(title);
+  return !!parts && JAVTRAILERS_MGSTAGE_PREFIXES.has(parts.prefix);
+}
+
+function shouldFetchJavTrailersPage(title) {
+  const parts = parseJavCodeParts(title);
+  if (!parts) return false;
+  return isJavTrailersMgstageTitle(title) || parts.prefix.includes("VR");
+}
+
+function buildJavTrailersPageIds(title) {
+  const parts = parseJavCodeParts(title);
+  if (!parts) return [];
+  const ids = [];
+  if (JAVTRAILERS_MGSTAGE_PREFIXES.has(parts.prefix)) ids.push(`118${parts.prefixLower}${parts.number5}`);
+  ids.push(parts.code);
+  return ids.filter((id, i, a) => id && a.indexOf(id) === i);
+}
+
+function extractJavTrailersMediaUrl(html) {
+  if (!html || html.includes("Just a moment")) return "";
+  const source = String(html);
+  const m = source.match(/https:\/\/media\.javtrailers\.com\/[^"'\\\s<]+?(?:\.m3u8|\.mp4)/g);
+  if (m && m.length > 0) return m[0];
+  const ms = source.match(/https:\/\/sample\.mgstage\.com\/[^"'\\\s<]+?\.mp4/g);
+  if (ms && ms.length > 0) return ms[0];
+  const d = source.match(/https:\/\/cc3001\.dmm\.co\.jp\/[^"'\\\s<]+?(?:\.m3u8|\.mp4)/g);
+  return d && d.length > 0 ? d[0] : "";
+}
+
+function fetchJavTrailersPageUrl(pageId) {
+  return Widget.http.get(`https://javtrailers.com/video/${pageId}`, { headers: JAVTRAILERS_GALLERY_HEADERS })
+    .then(res => extractJavTrailersMediaUrl(res.data))
+    .catch(() => "");
+}
+
+async function buildJavTrailersUrl(title) {
+  const parts = parseJavCodeParts(title);
+  if (!parts) return "";
+  if (JAVTRAILERS_URL_CACHE[parts.code] !== undefined) return JAVTRAILERS_URL_CACHE[parts.code];
+  const fallbackUrl = buildJavTrailersFallbackUrl(title);
+  const isMgstage = isJavTrailersMgstageTitle(title);
+  if (!shouldFetchJavTrailersPage(title)) { JAVTRAILERS_URL_CACHE[parts.code] = fallbackUrl; return fallbackUrl; }
+  if (!JAVTRAILERS_URL_PROMISE_CACHE[parts.code]) {
+    const pageIds = buildJavTrailersPageIds(title);
+    JAVTRAILERS_URL_PROMISE_CACHE[parts.code] = Promise.all(pageIds.map(id => fetchJavTrailersPageUrl(id)))
+      .then(urls => urls.find(Boolean) || (isMgstage ? "" : fallbackUrl))
+      .then(url => { if (url || !isMgstage) JAVTRAILERS_URL_CACHE[parts.code] = url; return url; });
+  }
+  try {
+    if (isMgstage) return await JAVTRAILERS_URL_PROMISE_CACHE[parts.code];
+    return await Promise.race([JAVTRAILERS_URL_PROMISE_CACHE[parts.code], new Promise(r => setTimeout(() => r(fallbackUrl), JAVTRAILERS_FETCH_TIMEOUT_MS))]);
+  } catch (e) { return isMgstage ? "" : fallbackUrl; }
+}
+
+function buildTrailerCoverUrl(title) {
+  const parts = parseJavCodeParts(title);
+  if (!parts) return "";
+  const mgPrefixes = new Set(["ABF", "ABW", "JUFE", "SQTE"]);
+  if (mgPrefixes.has(parts.prefix)) {
+    return `https://image.mgstage.com/images/prestige/${parts.prefixLower}/${parts.number3}/pb_e_${parts.prefixLower}-${parts.number3}.jpg`;
+  }
+  return `https://pics.dmm.co.jp/digital/video/${parts.code}/${parts.code}pl.jpg`;
+}
+
+// ---- JavTrailers Gallery functions ----
+
+function resolveJavTrailersUrl(path) {
+  if (!path) return "";
+  if (path.startsWith("http")) return path;
+  return `${JAVTRAILERS_GALLERY_BASE_URL}${path.startsWith("/") ? path : "/" + path}`;
+}
+
+function normalizeText(text) { return (text || "").replace(/\s+/g, " ").trim(); }
+
+function cleanDvdId(raw) {
+  return normalizeText(raw)
+    .replace(/-UNCENSORED-LEAK$/i, "").replace(/-CHINESE-SUBTITLE$/i, "")
+    .replace(/_UNCENSORED_LEAK$/i, "").replace(/_CHINESE_SUBTITLE$/i, "")
+    .replace(/\s+/g, "").trim();
+}
+
+function normalizeDvdIdForSearch(dvdId) {
+  const clean = cleanDvdId(dvdId).toUpperCase();
+  const m = clean.match(/^([A-Z]+)[-_ ]*0*(\d+)$/);
+  if (m) return `${m[1].toLowerCase()}-${parseInt(m[2], 10)}`;
+  return clean.replace(/_/g, "-").replace(/\s+/g, "-").toLowerCase();
+}
+
+function normalizeDvdIdForCompare(dvdId) {
+  const clean = cleanDvdId(dvdId).toUpperCase();
+  const m = clean.match(/([A-Z]+)[-_ ]*0*(\d+)/);
+  if (m) return `${m[1]}${parseInt(m[2], 10)}`;
+  return clean.replace(/[^A-Z0-9]/g, "");
+}
+
+function buildDmmContentIdFromDvdId(dvdId) {
+  const clean = cleanDvdId(dvdId).toLowerCase();
+  const m = clean.match(/^([a-z]+)[-_ ]*0*(\d+)$/i);
+  if (!m) return clean.replace(/[^a-z0-9]/gi, "");
+  return `${m[1].toLowerCase()}${String(parseInt(m[2], 10)).padStart(5, "0")}`;
+}
+
+function buildDmmGallery(contentId, count) {
+  count = count || 10;
+  const id = String(contentId || "").toLowerCase().trim();
+  if (!id) return [];
+  return Array.from({ length: count }, (_, i) => `https://pics.dmm.co.jp/digital/video/${id}/${id}jp-${i + 1}.jpg`);
+}
+
+function buildMgstageGalleryFromDvdId(dvdId, count) {
+  count = count || 10;
+  const clean = cleanDvdId(dvdId).toLowerCase();
+  const m = clean.match(/^([a-z]+)[-_ ]*0*(\d+)$/i);
+  if (!m) return [];
+  const prefix = m[1].toLowerCase();
+  const number = String(parseInt(m[2], 10));
+  const dvdDash = `${prefix}-${number}`;
+  return Array.from({ length: count }, (_, i) => `https://image.mgstage.com/images/prestige/${prefix}/${number}/cap_e_${i + 1}_${dvdDash}.jpg`);
+}
+
+function buildMgstageGalleryFromHtmlOrDvdId(html, dvdId, count) {
+  count = count || 10;
+  const raw = String(html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&").replace(/\\u002F/g, "/");
+  const seen = new Set();
+  const urls = [];
+  const pushUrl = url => { const c = normalizeImageUrl(url); if (c && !seen.has(c)) { seen.add(c); urls.push(c); } };
+  const cm = raw.match(/https?:\/\/image\.mgstage\.com\/images\/([^"'\s<>]+?)\/([a-z]+)\/(\d+)\/pf_o\d+_([a-z]+-\d+)\.(?:jpg|jpeg|webp|png)/i);
+  if (cm) {
+    for (let i = 1; i <= count; i++) pushUrl(`https://image.mgstage.com/images/${cm[1]}/${cm[2].toLowerCase()}/${cm[3]}/cap_e_${i}_${cm[4].toLowerCase()}.jpg`);
+    return urls;
+  }
+  return buildMgstageGalleryFromDvdId(dvdId, count);
+}
+
+function extractCompareIdsFromText(text) {
+  const raw = String(text || "");
+  const ids = [], seen = new Set();
+  const patterns = [
+    { re: /([a-z]{2,12})[-_\s\/]*0*(\d{2,6})/gi, prefixIdx: 1, numIdx: 2 },
+    { re: /(\d+)([a-z]{2,12})0*(\d{2,6})/gi, prefixIdx: 2, numIdx: 3 },
+  ];
+  for (const { re, prefixIdx, numIdx } of patterns) {
+    let m; while ((m = re.exec(raw)) !== null) {
+      const prefix = m[prefixIdx] || "", num = m[numIdx] || "";
+      if (!prefix || !num) continue;
+      const id = `${prefix.toUpperCase()}${parseInt(num, 10)}`;
+      if (!seen.has(id)) { seen.add(id); ids.push(id); }
+    }
+  }
+  return ids;
+}
+
+function imageUrlMatchesDvd(url, dvdId, contentId) {
+  const target = normalizeDvdIdForCompare(dvdId);
+  const cc = normalizeDvdIdForCompare(contentId);
+  const candidates = extractCompareIdsFromText(url);
+  if (!target && !cc) return true;
+  return candidates.some(c => c === target || c === cc || target.includes(c) || c.includes(target) || cc.includes(c) || c.includes(cc));
+}
+
+function normalizeImageUrl(url) {
+  if (!url) return "";
+  let clean = String(url).replace(/\\\//g, "/").replace(/&amp;/g, "&").trim();
+  if (!clean || clean.startsWith("data:")) return "";
+  if (clean.startsWith("//")) clean = "https:" + clean;
+  return resolveJavTrailersUrl(clean);
+}
+
+function sortGalleryUrls(urls) {
+  return (urls || []).sort((a, b) => {
+    const i = u => { const p = [/jp-(\d+)\./i, /cap_e_(\d+)_/i, /cap_e_(\d+)\./i, /cap_(\d+)_/i, /-(\d+)\.(?:jpg|jpeg|webp|png)/i]; for (const r of p) { const m = u.match(r); if (m) return parseInt(m[1], 10); } return 9999; };
+    return i(a) - i(b);
+  });
+}
+
+function extractGalleryImagesFromSwiper($, dvdId, contentId) {
+  const urls = [], seen = new Set();
+  const pushUrl = url => { const c = normalizeImageUrl(url); if (c && !seen.has(c) && imageUrlMatchesDvd(c, dvdId, contentId)) { seen.add(c); urls.push(c); } };
+  $(".swiper-wrapper .swiper-slide.image-container img, .swiper-wrapper .swiper-slide img").each((_, el) => {
+    const $img = $(el);
+    pushUrl($img.attr("src") || ""); pushUrl($img.attr("data-src") || ""); pushUrl($img.attr("data-original") || ""); pushUrl($img.attr("data-lazy") || "");
+  });
+  return sortGalleryUrls(urls);
+}
+
+function extractGalleryImagesFromRawHtml(html, dvdId, contentId) {
+  const raw = String(html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&").replace(/\\u002F/g, "/");
+  const urls = [], seen = new Set();
+  const pushUrl = url => { const c = normalizeImageUrl(url); if (c && !seen.has(c) && imageUrlMatchesDvd(c, dvdId, contentId)) { seen.add(c); urls.push(c); } };
+  [/https?:\/\/pics\.dmm\.co\.jp\/digital\/video\/[^"'\s<>]+?\/[^"'\s<>]+?jp-\d+\.(?:jpg|jpeg|webp|png)/gi,
+   /https?:\/\/image\.mgstage\.com\/images\/[^"'\s<>]+?\/cap_e_\d+_[^"'\s<>]+?\.(?:jpg|jpeg|webp|png)/gi,
+   /https?:\/\/image\.mgstage\.com\/images\/[^"'\s<>]+?\/pf_o\d+_[^"'\s<>]+?\.(?:jpg|jpeg|webp|png)/gi,
+   /src=["']([^"']*cap_e_\d+_[^"']+\.(?:jpg|jpeg|webp|png))["']/gi,
+   /src=["']([^"']*pf_o\d+_[^"']+\.(?:jpg|jpeg|webp|png))["']/gi,
+   /src=["']([^"']*jp-\d+\.(?:jpg|jpeg|webp|png))["']/gi].forEach(pat => { let m; while ((m = pat.exec(raw)) !== null) pushUrl(m[1] || m[0]); });
+  return sortGalleryUrls(urls);
+}
+
+function isMgstageCoverOnlyImage(url) { return /image\.mgstage\.com\/images\/.+?\/pf_o\d+_/i.test(String(url || "")); }
+
+function isLikelyDmmContentId(contentId) { return /^(?:\d+)?[a-z]+0\d{4,5}$/i.test(String(contentId || "").toLowerCase().trim()); }
+
+function isDmmSourceHtml(html) { const r = String(html || "").toLowerCase(); return r.includes("pics.dmm.co.jp") || r.includes("al.fanza.co.jp") || r.includes("fanza"); }
+
+function isMgstageSourceHtml(html) { const r = String(html || "").toLowerCase(); return r.includes("image.mgstage.com") || r.includes("mgstage.nihonjav.com") || r.includes("mgstage"); }
+
+function extractDmmGalleryFromHtml(html, contentId, dvdId) {
+  const $ = Widget.html.load(html);
+  const swiper = extractGalleryImagesFromSwiper($, dvdId, contentId);
+  if (swiper.length) return swiper;
+  const raw = extractGalleryImagesFromRawHtml(html, dvdId, contentId);
+  const isMg = isMgstageSourceHtml(html);
+  const hasReal = raw.some(u => !isMgstageCoverOnlyImage(u) && (/cap_e_\d+_/i.test(u) || /jp-\d+\./i.test(u)));
+  if (raw.length && (!isMg || hasReal)) return raw;
+  const finalId = String(contentId || "").toLowerCase().trim();
+  if (isDmmSourceHtml(html) && isLikelyDmmContentId(finalId)) return buildDmmGallery(finalId, 10);
+  if (isMg) return buildMgstageGalleryFromHtmlOrDvdId(html, dvdId, 10);
+  return [];
+}
+
+function buildDmmBackdropFromContentId(contentId) {
+  const id = String(contentId || "").toLowerCase().trim();
+  return id ? `https://pics.dmm.co.jp/digital/video/${id}/${id}pl.jpg` : "";
+}
+
+function buildMgstageBackdropFromDvdId(dvdId, maker) {
+  maker = maker || "prestige";
+  const clean = cleanDvdId(dvdId).toLowerCase();
+  const m = clean.match(/^([a-z]+)[-_ ]*0*(\d+)$/i);
+  if (!m) return "";
+  return `https://image.mgstage.com/images/${maker}/${m[1].toLowerCase()}/${String(parseInt(m[2], 10))}/pb_e_${m[1].toLowerCase()}-${String(parseInt(m[2], 10))}.jpg`;
+}
+
+function extractJavTrailersBackdropPath($, html, contentId, dvdId) {
+  const raw = String(html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&");
+  const mg = raw.match(/https?:\/\/image\.mgstage\.com\/images\/[^"'\s<>]+?\/pb_e_[^"'\s<>]+?\.(?:jpg|jpeg|webp|png)/i);
+  if (mg) return normalizeImageUrl(mg[0]);
+  const d = raw.match(/https?:\/\/pics\.dmm\.co\.jp\/digital\/video\/[^"'\s<>]+?\/[^"'\s<>]+?pl\.(?:jpg|jpeg|webp|png)/i);
+  if (d) return normalizeImageUrl(d[0]);
+  const pf = raw.match(/https?:\/\/image\.mgstage\.com\/images\/([^"'\s<>]+?)\/([a-z]+)\/(\d+)\/pf_o\d+_([a-z]+-\d+)\.(?:jpg|jpeg|webp|png)/i);
+  if (pf) return `https://image.mgstage.com/images/${pf[1]}/${pf[2].toLowerCase()}/${pf[3]}/pb_e_${pf[4].toLowerCase()}.jpg`;
+  const dvd = cleanDvdId(dvdId).toLowerCase().match(/^([a-z]+)[-_ ]*0*(\d+)$/i);
+  if (dvd && dvd[1].toLowerCase() === "abf") { const b = buildMgstageBackdropFromDvdId(dvdId, "prestige"); if (b) return b; }
+  const finalId = String(contentId || "").toLowerCase().trim();
+  if (isLikelyDmmContentId(finalId)) return buildDmmBackdropFromContentId(finalId);
+  return "";
+}
+
+function scoreJavTrailersSearchResult($, $a, targetCompareId) {
+  const href = resolveJavTrailersUrl($a.attr("href") || "");
+  const slug = href.split("/").filter(Boolean).pop() || "";
+  const candidates = [normalizeText($a.text()), normalizeText($a.closest("div,li,article,section").text()), slug];
+  let bestScore = 0;
+  candidates.forEach(c => { const compare = normalizeDvdIdForCompare(c); if (compare === targetCompareId) bestScore = Math.max(bestScore, 100); });
+  if (href.includes("/video/")) bestScore += 10;
+  if (normalizeDvdIdForCompare(slug) === targetCompareId) bestScore = Math.max(bestScore, 110);
+  return { href, slug, contentId: slug.toLowerCase(), score: bestScore };
+}
+
+async function findJavTrailersDetailUrl(dvdId) {
+  const searchKeyword = normalizeDvdIdForSearch(dvdId), targetCompareId = normalizeDvdIdForCompare(dvdId);
+  if (!searchKeyword || !targetCompareId) return "";
+  try {
+    const res = await Widget.http.get(`${JAVTRAILERS_GALLERY_BASE_URL}/search/${encodeURIComponent(searchKeyword)}`, { headers: JAVTRAILERS_GALLERY_HEADERS, timeout: 2500 });
+    const html = res.data || "", $ = Widget.html.load(html);
+    const candidates = [];
+    $('a[href*="/video/"]').each((_, el) => { const r = scoreJavTrailersSearchResult($, $(el), targetCompareId); if (r.href) candidates.push(r); });
+    candidates.sort((a, b) => b.score - a.score);
+    if (candidates.length && candidates[0].score >= 60) return candidates[0].href;
+    let m; while ((m = /href=["']([^"']*\/video\/([a-z0-9_]+)[^"']*)["']/gi.exec(html)) !== null) { const href = resolveJavTrailersUrl(m[1]), slug = m[2] || ""; if (normalizeDvdIdForCompare(slug) === targetCompareId) return href; }
+    return "";
+  } catch (e) { return ""; }
+}
+
+function extractJavTrailersContentId($, html, detailUrl) {
+  const urlMatch = String(detailUrl || "").match(/\/video\/([a-z0-9_]+)/i);
+  if (urlMatch) return urlMatch[1].toLowerCase();
+  const textMatch = normalizeText($("body").text()).match(/Content\s*ID\s*:?\s*([a-z0-9_]+)/i);
+  if (textMatch) return textMatch[1].toLowerCase();
+  const imgMatch = String(html || "").match(/pics\.dmm\.co\.jp\/digital\/video\/([a-z0-9_]+)\//i);
+  if (imgMatch) return imgMatch[1].toLowerCase();
+  return "";
+}
+
+async function fetchJavTrailersMeta(dvdId) {
+  const empty = { backdropPath: "", backdropPaths: [] };
+  if (!dvdId) return empty;
+  const buildFallbackBackdrop = (contentId, dvdId) => {
+    const md = cleanDvdId(dvdId).toLowerCase().match(/^([a-z]+)[-_ ]*0*(\d+)$/i);
+    if (md && md[1].toLowerCase() === "abf") { const b = buildMgstageBackdropFromDvdId(dvdId, "prestige"); if (b) return b; }
+    const finalId = String(contentId || "").toLowerCase().trim();
+    if (isLikelyDmmContentId(finalId)) return buildDmmBackdropFromContentId(finalId);
+    return "";
+  };
+  try {
+    const detailUrl = await findJavTrailersDetailUrl(dvdId);
+    if (!detailUrl) {
+      const ecid = buildDmmContentIdFromDvdId(dvdId);
+      const bp = buildFallbackBackdrop(ecid, dvdId) || buildDmmBackdropFromContentId(ecid);
+      const bps = isLikelyDmmContentId(ecid) ? buildDmmGallery(ecid, 10) : [];
+      return { backdropPath: bp || "", backdropPaths: bps };
+    }
+    const res = await Widget.http.get(detailUrl, { headers: { ...JAVTRAILERS_GALLERY_HEADERS, Referer: `${JAVTRAILERS_GALLERY_BASE_URL}/` }, timeout: 2500 });
+    const html = res.data || "", $ = Widget.html.load(html);
+    const contentId = extractJavTrailersContentId($, html, detailUrl), expectedContentId = buildDmmContentIdFromDvdId(dvdId);
+    const strip = s => String(s || "").toLowerCase().replace(/^\d+/, "");
+    if (contentId && expectedContentId && strip(contentId) !== strip(expectedContentId)) {
+      const isMg = JAVTRAILERS_MGSTAGE_PREFIXES.has((cleanDvdId(dvdId).match(/^([a-z]+)/i) || [])[1] || "".toUpperCase());
+      return { backdropPath: isMg ? (buildMgstageBackdropFromDvdId(dvdId, "prestige") || "") : (buildDmmBackdropFromContentId(expectedContentId.toLowerCase()) || ""), backdropPaths: isMg ? buildMgstageGalleryFromDvdId(dvdId, 10) : isLikelyDmmContentId(expectedContentId.toLowerCase()) ? buildDmmGallery(expectedContentId.toLowerCase(), 10) : [] };
+    }
+    let bp = extractJavTrailersBackdropPath($, html, contentId, dvdId);
+    if (!bp) bp = buildFallbackBackdrop(contentId, dvdId);
+    const bps = extractDmmGalleryFromHtml(html, contentId, dvdId);
+    return { backdropPath: bp || "", backdropPaths: bps };
+  } catch (e) { const fb = buildFallbackBackdrop("", dvdId); if (fb) return { backdropPath: fb, backdropPaths: [] }; return empty; }
+}
+
+function extractDvdId(link) {
+  const slug = String(link || "").split("?")[0].split("/").filter(Boolean).pop() || "";
+  return slug.replace(/-(uncensored-leak|chinese-subtitle)$/i, "").toUpperCase();
+}
+
+// ==================== Stream Source（番号匹配 Jable 播放源）====================
+
+function normalizeCode(value) {
+  return String(value || "").toUpperCase().replace(/[\s_\-]+/g, "");
+}
+
+function extractSearchCode(text, options = {}) {
+  const allowPureNumeric = options.allowPureNumeric !== false;
+  const s = String(text || "").toUpperCase().replace(/\./g, " ").replace(/_/g, "-").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  const patterns = [
+    /\bFC2(?:[- ]?PPV)?[- ]?\d{5,8}\b/,
+    /\bCARIB[- ]?\d{6,8}\b/,
+    /\b1PONDO[- ]?\d{6,8}\b/,
+    /\bHEYZO[- ]?\d{3,6}\b/,
+    /\bT28[- ]?\d{6,8}\b/,
+    /\b(?:S2M|MIAA|SSNI|SNIS|IPX|IPZZ|SSIS|JUQ|MIDE|MIDV|STARS|ABW|RKI|DVAJ|WANZ|LULU|DLDSS|VRTM|SDMU|SDDE|MKMP|HMN|MUDR|ADN|CAWD|PPPE|PRED|MGR|SHKD|MXGS|FSDSS|JUL|KTB|MIAB|GVH|MIMK|JUY|JUTA|IDBD|HND|DASD|CLO|BF|HONB|ROE|CEMD|MIUM|NITR|RCTD|RCT|IPVR|MIBD|JUR|JURD|SOE|ORE|PYO|START|NSFS)\s*[-_ ]?\d{2,6}[A-Z]?(?:[-_ ]?[A-Z]{0,4})?\b/,
+    /\b[A-Z]{2,10}\s*[-_ ]?\d{2,8}[A-Z]?\b/
+  ];
+  if (allowPureNumeric) patterns.push(/\b\d{6,8}\b/);
+  for (const reg of patterns) {
+    const match = s.match(reg);
+    if (match && match[0]) return match[0].replace(/\s+/g, "").replace(/_/g, "-").replace(/-+/g, "-").toUpperCase();
+  }
+  return "";
+}
+
+function collectStringValues(value, depth = 0, out = [], visited = new Set()) {
+  if (value === null || value === undefined || depth > 5) return out;
+  const valueType = typeof value;
+  if (valueType === "string" || valueType === "number") {
+    const text = String(value).trim();
+    if (text) out.push(text);
+    return out;
+  }
+  if (valueType !== "object") return out;
+  if (visited.has(value)) return out;
+  visited.add(value);
+  if (Array.isArray(value)) { for (const item of value) collectStringValues(item, depth + 1, out, visited); return out; }
+  for (const key of Object.keys(value)) collectStringValues(value[key], depth + 1, out, visited);
+  return out;
+}
+
+function extractCodeFromParams(params = {}) {
+  const priorityCandidates = [
+    params.code, params.videoId, params.number,
+    params.fileName, params.filename, params.file_name, params.name, params.path,
+    params.filePath, params.file_path, params.mediaPath, params.media_path,
+    params.itemPath, params.item_path, params.localPath, params.local_path,
+    params.originalFilename, params.originalFileName,
+    params.id, params.title, params.seriesName, params.originalTitle, params.originalName,
+    params.episodeName, params.description, params.genreTitle, params.overview,
+    params.link, params.url, params.videoUrl, params.playUrl, params.streamUrl,
+  ];
+  if (params.tmdbInfo) {
+    priorityCandidates.push(params.tmdbInfo.title, params.tmdbInfo.name, params.tmdbInfo.originalTitle, params.tmdbInfo.originalName, params.tmdbInfo.overview);
+  }
+  if (params.info) {
+    priorityCandidates.push(params.info.title, params.info.name, params.info.originalTitle, params.info.originalName, params.info.overview);
+  }
+  if (params.mediaSource) {
+    priorityCandidates.push(params.mediaSource.name, params.mediaSource.fileName, params.mediaSource.filename, params.mediaSource.path, params.mediaSource.url, params.mediaSource.streamUrl);
+  }
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) {
+      priorityCandidates.push(source && source.name, source && source.fileName, source && source.filename, source && source.path, source && source.url, source && source.streamUrl);
+    }
+  }
+  for (const value of priorityCandidates) { const code = extractSearchCode(value, { allowPureNumeric: true }); if (code) return code; }
+  for (const value of collectStringValues(params)) { const code = extractSearchCode(value, { allowPureNumeric: false }); if (code) return code; }
+  return "";
+}
+
+function parseJableSearchResults(html, targetCode) {
+  if (!html || typeof html !== "string") return [];
+  const $ = Widget.html.load(html);
+  const results = [];
+  const seen = new Set();
+  $(".video-img-box").each((i, el) => {
+    const $el = $(el);
+    const $titleLink = $el.find(".title a").first();
+    const href = $titleLink.attr("href") || "";
+    const link = String(href).trim();
+    if (!link || !link.includes("jable.tv") || seen.has(link)) return;
+    const title = $titleLink.text().trim();
+    const $img = $el.find("img").first();
+    const cover = $img.attr("data-src") || $img.attr("src") || "";
+    const match = (link.match(/\/([^/?#]+)(?:\?|#|$)/) || [])[1] || "";
+    let decoded;
+    try { decoded = decodeURIComponent(match); } catch (e) { decoded = match.replace(/%[0-9A-Fa-f]{2}/g, ""); }
+    const code = extractSearchCode(decoded.replace(/-/g, " "), { allowPureNumeric: true }) || extractSearchCode(title, { allowPureNumeric: true });
+    if (!code) return;
+    seen.add(link);
+    results.push({ title, link, code, cover });
+  });
+  if (results.length === 0) {
+    $("a[href]").each((i, el) => {
+      const href = $(el).attr("href") || "";
+      const link = String(href).trim();
+      if (!link || !link.includes("jable.tv") || seen.has(link)) return;
+      const match = (link.match(/\/([^/?#]+)(?:\?|#|$)/) || [])[1] || "";
+      let decoded2;
+      try { decoded2 = decodeURIComponent(match); } catch (e) { decoded2 = match.replace(/%[0-9A-Fa-f]{2}/g, ""); }
+      const codeFromLink = extractSearchCode(decoded2.replace(/-/g, " "), { allowPureNumeric: true });
+      if (!codeFromLink) return;
+      seen.add(link);
+      results.push({ title: $(el).text().trim(), link, code: codeFromLink, cover: "" });
+    });
+  }
+  const targetLoose = normalizeCode(targetCode);
+  const exact = results.filter(item => normalizeCode(item.code) === targetLoose);
+  if (exact.length > 0) return exact;
+  return results;
+}
+
+function detectJableChineseSubtitle(html) {
+  const $ = Widget.html.load(html);
+  const keywords = $('meta[name="keywords"]').attr("content") || "";
+  const firstKeyword = keywords.split(/[,，]/).map(s => s.trim()).filter(Boolean)[0];
+  if (firstKeyword === "中文字幕") return true;
+  const description = $('meta[name="description"]').attr("content") || "";
+  if (description.includes("中文字幕版") || description.includes("更新至中文字幕") || description.includes("中文字幕")) return true;
+  const lowerHtml = String(html).toLowerCase();
+  if (lowerHtml.includes("chinese-subtitle") || lowerHtml.includes("chinese subtitle")) return true;
+  return false;
+}
+
+async function loadResource(params = {}) {
+  try {
+    const code = extractCodeFromParams(params);
+    if (!code) return [];
+    const targetLoose = normalizeCode(code);
+    let matched = null;
+    const keys = [...new Set([code, code.replace(/-/g, "")])];
+    for (const key of keys) {
+      const keyword = encodeURIComponent(key);
+      const searchUrl = `https://jable.tv/search/${keyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${keyword}`;
+      const resp = await Widget.http.get(searchUrl, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36", "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" } });
+      const html = resp && resp.data;
+      if (!html) continue;
+      const results = parseJableSearchResults(html, code);
+      matched = results.find(item => normalizeCode(item.code) === targetLoose);
+      if (matched) break;
+    }
+    if (!matched || !matched.link) return [];
+    const detailResp = await Widget.http.get(matched.link, { headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36", "Referer": "https://jable.tv/" } });
+    const detailHtml = detailResp && detailResp.data;
+    if (!detailHtml) return [];
+    const hlsUrlMatch = detailHtml.match(/var\s+hlsUrl\s*=\s*['"](.*?)['"]/i);
+    const hlsUrl = hlsUrlMatch && hlsUrlMatch[1] ? (hlsUrlMatch[1].startsWith("//") ? `https:${hlsUrlMatch[1]}` : hlsUrlMatch[1]) : "";
+    if (!hlsUrl) return [];
+    const isChineseSubtitle = detectJableChineseSubtitle(detailHtml);
+    const sourceName = isChineseSubtitle ? "Jable 中文字幕" : "Jable 正片";
+    return [{
+      name: sourceName,
+      description: `番号：${code}\n字幕：${isChineseSubtitle ? "中文字幕" : "无"}`,
+      url: hlsUrl,
+      customHeaders: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Referer": matched.link,
+        "Origin": "https://jable.tv"
+      }
+    }];
+  } catch (e) {
+    return [];
+  }
+}
+
