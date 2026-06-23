@@ -5,12 +5,33 @@ WidgetMetadata = {
     description: "MissAV 视频聚合模块，支持其他模块聚合missav资源、支持高清海报、封面图、预告片、相似推荐、演员信息及头像",
     version: "3.1",
     requiredVersion: "0.0.1",
-    site: "https://missav.ai",
+    site: "https://missav.ws",
+    globalParams: [
+        {
+            name: "baseUrl",
+            title: "站点地址",
+            type: "input",
+            value: "https://missav.ws",
+            placeholders: [
+                { title: "missav.ws", value: "https://missav.ws" },
+                { title: "missav.ai", value: "https://missav.ai" },
+                { title: "missav.live", value: "https://missav.live" }
+            ]
+        },
+        {
+            name: "cfCookie",
+            title: "Cloudflare Cookie",
+            type: "input",
+            value: "",
+            placeholders: [
+                { title: "浏览器验证后的 Cookie", value: "cf_clearance=..." }
+            ]
+        }
+    ],
     modules: [
         {
             title: "最近更新",
             functionName: "loadRecentUpdates",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" }
             ]
@@ -18,7 +39,6 @@ WidgetMetadata = {
         {
             title: "中文字幕",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm278/cn/chinese-subtitle", enumOptions: [{ title: "中文字幕", value: "dm278/cn/chinese-subtitle" }] },
@@ -34,7 +54,6 @@ WidgetMetadata = {
         {
             title: "日本AV",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm632/cn/release", enumOptions: [
@@ -56,7 +75,6 @@ WidgetMetadata = {
         {
             title: "素人",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm36/cn/siro", enumOptions: [
@@ -81,7 +99,6 @@ WidgetMetadata = {
         {
             title: "无码影片",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm816/cn/uncensored-leak", enumOptions: [
@@ -114,7 +131,6 @@ WidgetMetadata = {
         {
             title: "亚洲AV",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm63/cn/madou", enumOptions: [
@@ -138,7 +154,6 @@ WidgetMetadata = {
         {
             title: "女优",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm179/cn/actresses/%E7%80%AC%E6%88%B8%E7%92%B0%E5%A5%88", enumOptions: [
@@ -203,7 +218,6 @@ WidgetMetadata = {
         {
             title: "类型",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm96/cn/genres/%E9%AB%98%E6%B8%85", enumOptions: [
@@ -258,7 +272,6 @@ WidgetMetadata = {
         {
             title: "发行商",
             functionName: "loadList",
-            type: "video",
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm825/cn/makers/Moody%27s", enumOptions: [
@@ -313,7 +326,6 @@ WidgetMetadata = {
         {
             title: "🔍 搜索视频",
             functionName: "searchList",
-            type: "video",
             params: [
                 { name: "keyword", title: "关键词", type: "input", value: "" },
                 { name: "page", title: "页码", type: "page" }
@@ -340,13 +352,14 @@ WidgetMetadata = {
     }
 };
 
-const BASE_URL = "https://missav.ai";
-const AVATAR_BASE_URL = "https://missav.ai";
+const DEFAULT_BASE_URL = "https://missav.ws";
+let BASE_URL = DEFAULT_BASE_URL;
+let AVATAR_BASE_URL = DEFAULT_BASE_URL;
 const HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Referer": "https://missav.ai/",
+    "Referer": DEFAULT_BASE_URL + "/",
     "Connection": "keep-alive"
 };
 
@@ -354,6 +367,79 @@ const PEOPLE_AVATAR_CACHE = {};
 const RECENT_UPDATES_CATEGORY = "recent_updates";
 const RECENT_UPDATES_ENDPOINT = "dm539/cn/new";
 const VIDEO_URL_CACHE = {};
+
+function configureRuntime(params = {}) {
+    let saved = {};
+    try { saved = Widget.storage.get("missav.runtimeParams") || {}; } catch (e) {}
+
+    const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
+    BASE_URL = isKnownSeizedBaseUrl(rawBaseUrl) ? DEFAULT_BASE_URL : normalizeBaseUrl(rawBaseUrl);
+    AVATAR_BASE_URL = BASE_URL;
+    HEADERS.Referer = BASE_URL + "/";
+
+    const cookie = String(params.cfCookie || saved.cfCookie || "").trim();
+    if (cookie) HEADERS.Cookie = cookie;
+    else delete HEADERS.Cookie;
+
+    try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie }); } catch (e) {}
+}
+
+function normalizeBaseUrl(value) {
+    return String(value || DEFAULT_BASE_URL).trim().replace(/\/+$/, "");
+}
+
+function isKnownSeizedBaseUrl(value) {
+    const host = normalizeBaseUrl(value).replace(/^https?:\/\//i, "").toLowerCase();
+    return host === "missav.com" || host === "www.missav.com" || host === "missav789.com" || host === "www.missav789.com";
+}
+
+function isCloudflareChallenge(html) {
+    const text = String(html || "");
+    return text.includes("Just a moment") ||
+        text.includes("cf-mitigated") ||
+        text.includes("challenges.cloudflare.com") ||
+        text.includes("Enable JavaScript and cookies to continue");
+}
+
+function isSeizedOrNoticePage(html) {
+    const text = String(html || "");
+    return text.includes("domain was confiscated") ||
+        text.includes("通过法律程序对该域名进行没收") ||
+        text.includes("違法アップロード動画") ||
+        text.includes("JAV Anti-Piracy Project") ||
+        (text.includes("ThisAV") && text.includes("page-feature") && !text.includes("div class=\"group\""));
+}
+
+function explainHttpError(error) {
+    const message = String((error && error.message) || error || "");
+    if (message.includes("Cloudflare") || message.includes("403")) {
+        throw new Error(`MissAV 返回 Cloudflare/403。当前站点地址为 ${BASE_URL}，请先在浏览器打开该站并通过验证，然后把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。`);
+    }
+    if (message.includes("域名没收") || message.includes("公告页")) {
+        throw error;
+    }
+    throw error instanceof Error ? error : new Error(message || "请求失败");
+}
+
+function getResponseStatus(resp) {
+    if (!resp) return 0;
+    return Number(resp.statusCode || resp.status || 0);
+}
+
+function getResponseHeader(resp, name) {
+    const headers = (resp && resp.headers) || {};
+    const lower = String(name || "").toLowerCase();
+    return headers[name] || headers[lower] || headers[lower.replace(/-/g, "_")] || "";
+}
+
+async function requestHeadCompat(url, options = {}) {
+    if (Widget.http && typeof Widget.http.head === "function") {
+        return await Widget.http.head(url, options);
+    }
+
+    const headers = Object.assign({}, options.headers || {}, { "Range": "bytes=0-0" });
+    return await Widget.http.get(url, Object.assign({}, options, { headers }));
+}
 
 function getSortOptions() {
     return [
@@ -696,7 +782,8 @@ function buildListUrl(endpoint, page = 1, filters = "", sort_by = "") {
     if (filters) params.push(`filters=${encodeURIComponent(filters)}`);
     if (sort_by) params.push(`sort=${encodeURIComponent(sort_by)}`);
     if (page > 1) params.push(`page=${page}`);
-    return `${BASE_URL}/${endpoint}${params.length ? `?${params.join("&")}` : ""}`;
+    const base = resolveUrl(endpoint);
+    return `${base}${params.length ? `${base.includes("?") ? "&" : "?"}${params.join("&")}` : ""}`;
 }
 
 function unpackPacker(html) {
@@ -981,16 +1068,17 @@ async function findAllMissAVDetailPages(code) {
 async function buildMissavStreamItems(uuid, code, detailLink, type = "有码") {
     const items = [];
     const headers = {
-        "Referer": "https://missav.ai/",
+        "Referer": BASE_URL + "/",
         "User-Agent": HEADERS["User-Agent"],
-        "Origin": "https://missav.ai"
+        "Origin": BASE_URL
     };
 
     try {
         const resp = await Widget.http.get(`https://surrit.com/${uuid}/1080p/video.m3u8`, {
             headers, timeout: 1500
         });
-        if (resp && resp.statusCode === 200 && String(resp.data || "").includes("#EXTM3U")) {
+        const status = getResponseStatus(resp);
+        if (resp && (status === 0 || status === 200) && String(resp.data || "").includes("#EXTM3U")) {
             items.push({
                 name: `MissAV ${type} 1080P`,
                 description: `番号：${code}\n类型：${type}\n来源：MissAV\n清晰度：1080P`,
@@ -1124,7 +1212,7 @@ function getJavpQualityLabel(quality) {
 async function isPlayableTrailerUrl(url) {
     if (!url) return false;
     try {
-        const res = await Widget.http.head(url, {
+        const res = await requestHeadCompat(url, {
             headers: {
                 "User-Agent": HEADERS["User-Agent"],
                 "Accept": "video/mp4,application/vnd.apple.mpegurl,application/x-mpegURL,*/*;q=0.8",
@@ -1132,7 +1220,8 @@ async function isPlayableTrailerUrl(url) {
             },
             timeout: JAVP_HEAD_TIMEOUT_MS
         });
-        return !!res && res.statusCode >= 200 && res.statusCode < 400;
+        const status = getResponseStatus(res);
+        return !!res && (status === 0 || (status >= 200 && status < 400));
     } catch (e) {
         return false;
     }
@@ -1408,16 +1497,17 @@ async function isImageUrlAvailable(url, checkSize = false) {
     }
 
     try {
-        const resp = await Widget.http.head(clean, {
+        const resp = await requestHeadCompat(clean, {
             headers: {
                 "User-Agent": HEADERS["User-Agent"],
                 "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-                "Referer": "https://missav.ai/"
+                "Referer": BASE_URL + "/"
             },
             timeout: checkSize ? IMAGE_SIZE_CHECK_TIMEOUT_MS : IMAGE_CHECK_TIMEOUT_MS
         });
 
-        if (!resp || resp.statusCode >= 400) {
+        const status = getResponseStatus(resp);
+        if (!resp || status >= 400) {
             IMAGE_AVAILABLE_CACHE[cacheKey] = false;
             return false;
         }
@@ -1425,9 +1515,7 @@ async function isImageUrlAvailable(url, checkSize = false) {
         // content-length 检查：太小说明是占位图（如 DMM 的 ps.jpg 占位图）
         if (checkSize && resp.headers) {
             const contentLength = parseInt(
-                resp.headers["content-length"] ||
-                resp.headers["Content-Length"] ||
-                resp.headers["content_length"] || "0", 10
+                getResponseHeader(resp, "content-length") || "0", 10
             );
             if (contentLength > 0 && contentLength < MIN_IMAGE_CONTENT_LENGTH) {
                 IMAGE_AVAILABLE_CACHE[cacheKey] = false;
@@ -1462,8 +1550,11 @@ async function pickAvailableBackdropUrl(videoIdOrTitle, fallback = "") {
 
 function resolveUrl(path) {
     if (!path) return "";
-    if (path.startsWith("http")) return path;
-    return `${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+    const cleaned = String(path)
+        .replace(/(https?:\/\/[^/]+)?\/dm\d+\//i, "$1/")
+        .replace(/^dm\d+\//i, "");
+    if (cleaned.startsWith("http")) return cleaned;
+    return `${BASE_URL}${cleaned.startsWith("/") ? cleaned : `/${cleaned}`}`;
 }
 
 function normalizeText(text) {
@@ -1473,8 +1564,14 @@ function normalizeText(text) {
 async function parseVideoList(html, options = {}) {
     const { includeImageFields = false, currentPeople = null, currentGenre = null } = options;
 
-    if (!html || html.includes("Just a moment")) {
-        return [{ id: "err_cf", type: "text", title: "被 Cloudflare 拦截", subTitle: "请稍后重试" }];
+    if (!html) {
+        throw new Error("MissAV 返回空响应");
+    }
+    if (isCloudflareChallenge(html)) {
+        throw new Error("MissAV 返回 Cloudflare 验证页");
+    }
+    if (isSeizedOrNoticePage(html)) {
+        throw new Error(`当前 MissAV 站点地址 ${BASE_URL} 返回的是域名没收/公告页，不是影片列表。请把模块参数“站点地址”改为当前可访问的新域名。`);
     }
 
     const $ = Widget.html.load(html);
@@ -1485,7 +1582,7 @@ async function parseVideoList(html, options = {}) {
     for (const el of cards) {
         const $el = $(el);
         const $link = $el.find("a.text-secondary");
-        const href = $link.attr("href");
+        const href = resolveUrl($link.attr("href") || "");
 
         if (href) {
             const title = $link.text().trim();
@@ -1524,7 +1621,8 @@ async function parseVideoList(html, options = {}) {
 
             const item = {
                 id: href,
-                type: "link",
+                type: "url",
+                mediaType: "movie",
                 title,
 
                 // 列表页实测优先吃 coverUrl。
@@ -1586,7 +1684,8 @@ async function parseVideoList(html, options = {}) {
 function buildStaticEntries(list, description) {
     return list.map((item) => ({
         id: item.value,
-        type: "link",
+        type: "url",
+        mediaType: "movie",
         title: item.title,
         link: resolveUrl(item.value),
         coverUrl: "",
@@ -2081,10 +2180,11 @@ async function fetchJavTrailersMeta(dvdId) {
 
 async function loadRecentUpdates(params = {}) {
     const { page = 1, sort_by = "published_at" } = params;
-    return loadList({ primary_category: RECENT_UPDATES_CATEGORY, page, sort_by });
+    return loadList({ ...params, primary_category: RECENT_UPDATES_CATEGORY, page, sort_by });
 }
 
 async function loadList(params = {}) {
+    configureRuntime(params);
     const { endpoint = "dm632/cn/release", page = 1, sort_by = "", filters = "", primary_category = "", peopleId = "", genreId = "" } = params;
     const targetEndpoint = resolveEndpointByPrimaryCategory(primary_category, endpoint);
     const targetSort = isRecentUpdatesCategory(primary_category) ? (sort_by || "published_at") : sort_by;
@@ -2127,11 +2227,13 @@ async function loadList(params = {}) {
             currentGenre: genreId ? buildGenreContext(normalizeGenreId(genreId), decodeURIComponent(String(genreId).split('/').pop() || '分类')) : null
         });
     } catch (e) {
-        return [{ id: "err", type: "text", title: "加载失败", subTitle: e.message }];
+        console.error("[MissAV loadList] 失败:", e.message || e);
+        explainHttpError(e);
     }
 }
 
 async function searchList(params = {}) {
+    configureRuntime(params);
     const { page = 1, keyword } = params;
 
     if (!keyword) {
@@ -2145,11 +2247,13 @@ async function searchList(params = {}) {
         const res = await Widget.http.get(url, { headers: HEADERS });
         return await parseVideoList(res.data);
     } catch (e) {
-        return [{ id: "err", type: "text", title: "搜索失败", subTitle: e.message }];
+        console.error("[MissAV searchList] 失败:", e.message || e);
+        explainHttpError(e);
     }
 }
 
 async function searchGlobal(params = {}) {
+    configureRuntime(params);
     const { page = 1, keyword } = params;
 
     if (!keyword) {
@@ -2163,11 +2267,13 @@ async function searchGlobal(params = {}) {
         const res = await Widget.http.get(url, { headers: HEADERS });
         return await parseVideoList(res.data, { includeImageFields: true });
     } catch (e) {
-        return [{ id: "err", type: "text", title: "全局搜索失败", subTitle: e.message }];
+        console.error("[MissAV searchGlobal] 失败:", e.message || e);
+        explainHttpError(e);
     }
 }
 
 async function loadResource(params = {}) {
+    configureRuntime(params);
     try {
         const code = extractCodeFromParams(params);
         if (!code) return [];
@@ -2313,7 +2419,7 @@ async function loadResourceLegacy(params, code) {
                 name: code.toUpperCase(),
                 description: "MissAV 播放源",
                 url: videoUrl,
-                customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": "https://missav.ai" }
+                customHeaders: { "Referer": currentReferer, "User-Agent": HEADERS["User-Agent"], "Origin": BASE_URL }
             }];
         }
         return [];
@@ -2434,7 +2540,8 @@ function extractRelatedItems($, currentLink) {
 
             relatedItems.push({
                 id: href,
-                type: "link",
+                type: "url",
+                mediaType: "movie",
                 title,
                 coverUrl: posterCover,
                 detailPoster: backdropCover,
@@ -2452,13 +2559,16 @@ function extractRelatedItems($, currentLink) {
 }
 
 async function loadDetail(link) {
+    configureRuntime({});
+    const detailLink = resolveUrl(link);
+    if (!detailLink) return null;
     try {
-        const res = await Widget.http.get(link, { headers: HEADERS });
+        const res = await Widget.http.get(detailLink, { headers: HEADERS });
         const html = res.data;
         const $ = Widget.html.load(html);
 
         const title = $('meta[property="og:title"]').attr('content') || $('h1').text().trim();
-        const code = extractSearchCode(title) || extractVideoId(link);
+        const code = extractSearchCode(title) || extractVideoId(detailLink);
 
         const actors = [];
         const peoples = [];
@@ -2561,18 +2671,18 @@ async function loadDetail(link) {
         }
 
         // 多路并行：JavTrailers 剧照 + 预告片 + 回退推荐 + 演员头像
-        const dvdId = extractDvdIdFromMissAv($, link);
+        const dvdId = extractDvdIdFromMissAv($, detailLink);
         const trailerTitle = title || $('meta[property="og:title"]').attr('content') || "";
 
         const finalVideoUrl = extractVideoUrlFromHtml(html);
 
         // 同步解析推荐视频（纯 DOM，无需网络）
-        const relatedItems = extractRelatedItems($, link);
+        const relatedItems = extractRelatedItems($, detailLink);
 
         // 回退推荐视频请求：提前发起，与 JavTrailers 并行
         const fallbackItemsPromise = (relatedItems.length === 0 && peoples.length > 0)
             ? loadList({ peopleId: peoples[0].id, page: 1 })
-                .then(f => Array.isArray(f) ? f.filter(v => extractVideoId(v.id) !== extractVideoId(link)).slice(0, 8) : [])
+                .then(f => Array.isArray(f) ? f.filter(v => extractVideoId(v.id) !== extractVideoId(detailLink)).slice(0, 8) : [])
                 .catch(() => [])
             : Promise.resolve(relatedItems);
 
@@ -2592,7 +2702,7 @@ async function loadDetail(link) {
             avatarPromise
         ]);
 
-        const detailCode = extractVideoId(link);
+        const detailCode = extractVideoId(detailLink);
 
         // ABF/ABP/ABW 的 MGStage 剧照常返回占位图（content-length 很小），
         // 用 HEAD + size 检查过滤掉。
@@ -2605,7 +2715,7 @@ async function loadDetail(link) {
 
         // DOM 推荐有内容就用 DOM 的，否则用回退的
         const finalRelatedItems = relatedItems.length > 0 ? relatedItems : fallbackItems;
-        const trailerCoverUrl = buildTrailerCoverUrl(trailerTitle) || buildMissavListCoverUrl(link);
+        const trailerCoverUrl = buildTrailerCoverUrl(trailerTitle) || buildMissavListCoverUrl(detailLink);
         const trailers = [];
         if (trailerUrl) {
             trailers.push({
@@ -2646,9 +2756,10 @@ async function loadDetail(link) {
             }
 
             const item = {
-                id: link,
-                type: "video",
+                id: detailLink,
+                type: "url",
                 title,
+                link: detailLink,
                 description: officialDescription,
                 videoUrl: finalVideoUrl,
                 actors,
@@ -2676,9 +2787,9 @@ async function loadDetail(link) {
                 relatedItems: finalRelatedItems,
 
                 customHeaders: {
-                    "Referer": "https://missav.ai/",
+                    "Referer": BASE_URL + "/",
                     "User-Agent": HEADERS["User-Agent"],
-                    "Origin": "https://missav.ai"
+                    "Origin": BASE_URL
                 }
             };
 
@@ -2694,8 +2805,9 @@ async function loadDetail(link) {
 
             return [item];
         }
-        return [{ id: "err", type: "text", title: "解析失败", subTitle: "未找到播放地址" }];
+        return [{ id: "err", type: "text", title: "解析失败", description: "未找到播放地址", subTitle: "未找到播放地址" }];
     } catch (e) {
-        return [{ id: "err", type: "text", title: "请求错误", subTitle: e.message }];
+        console.error("[MissAV loadDetail] 失败:", e.message || e);
+        explainHttpError(e);
     }
 }
