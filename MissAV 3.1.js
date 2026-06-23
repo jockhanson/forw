@@ -5,16 +5,16 @@ WidgetMetadata = {
     description: "MissAV 视频聚合模块，支持其他模块聚合missav资源、支持高清海报、封面图、预告片、相似推荐、演员信息及头像",
     version: "3.1",
     requiredVersion: "0.0.1",
-    site: "https://missav.ws",
+    site: "https://missav.ai",
     globalParams: [
         {
             name: "baseUrl",
             title: "站点地址",
             type: "input",
-            value: "https://missav.ws",
+            value: "https://missav.ai",
             placeholders: [
-                { title: "missav.ws", value: "https://missav.ws" },
                 { title: "missav.ai", value: "https://missav.ai" },
+                { title: "missav.ws", value: "https://missav.ws" },
                 { title: "missav.live", value: "https://missav.live" }
             ]
         },
@@ -352,7 +352,7 @@ WidgetMetadata = {
     }
 };
 
-const DEFAULT_BASE_URL = "https://missav.ws";
+const DEFAULT_BASE_URL = "https://missav.ai";
 let BASE_URL = DEFAULT_BASE_URL;
 let AVATAR_BASE_URL = DEFAULT_BASE_URL;
 const HEADERS = {
@@ -367,21 +367,26 @@ const PEOPLE_AVATAR_CACHE = {};
 const RECENT_UPDATES_CATEGORY = "recent_updates";
 const RECENT_UPDATES_ENDPOINT = "dm539/cn/new";
 const VIDEO_URL_CACHE = {};
+const FALLBACK_BASE_URLS = ["https://missav.ai", "https://missav.ws", "https://missav.live"];
 
 function configureRuntime(params = {}) {
     let saved = {};
     try { saved = Widget.storage.get("missav.runtimeParams") || {}; } catch (e) {}
 
     const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
-    BASE_URL = isKnownSeizedBaseUrl(rawBaseUrl) ? DEFAULT_BASE_URL : normalizeBaseUrl(rawBaseUrl);
-    AVATAR_BASE_URL = BASE_URL;
-    HEADERS.Referer = BASE_URL + "/";
+    setRuntimeBaseUrl(rawBaseUrl);
 
     const cookie = String(params.cfCookie || saved.cfCookie || "").trim();
     if (cookie) HEADERS.Cookie = cookie;
     else delete HEADERS.Cookie;
 
     try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie }); } catch (e) {}
+}
+
+function setRuntimeBaseUrl(value) {
+    BASE_URL = isKnownSeizedBaseUrl(value) ? DEFAULT_BASE_URL : normalizeBaseUrl(value);
+    AVATAR_BASE_URL = BASE_URL;
+    HEADERS.Referer = BASE_URL + "/";
 }
 
 function normalizeBaseUrl(value) {
@@ -419,6 +424,72 @@ function explainHttpError(error) {
         throw error;
     }
     throw error instanceof Error ? error : new Error(message || "请求失败");
+}
+
+function isCloudflareOr403Error(error) {
+    const message = String((error && error.message) || error || "");
+    return message.includes("Cloudflare") ||
+        message.includes("403") ||
+        message.includes("unacceptable: 403") ||
+        message.includes("Response status code was unacceptable");
+}
+
+function buildErrorItem(title, description) {
+    const text = String(description || "请稍后重试").trim();
+    return [{
+        id: "err",
+        type: "text",
+        title,
+        description: text,
+        subTitle: text
+    }];
+}
+
+function buildCloudflareItem() {
+    const tried = FALLBACK_BASE_URLS.join(" / ");
+    return buildErrorItem(
+        "Cloudflare 验证/403",
+        `已自动尝试 ${tried}，均被 Cloudflare/403 拦截。默认站点仍为 ${BASE_URL}。请在浏览器打开站点通过验证后，把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。`
+    );
+}
+
+function getBaseUrlCandidates(params = {}) {
+    const seen = {};
+    const candidates = [];
+    const push = (url) => {
+        const normalized = normalizeBaseUrl(url);
+        if (!normalized || seen[normalized]) return;
+        seen[normalized] = true;
+        candidates.push(normalized);
+    };
+
+    push(params.baseUrl || BASE_URL || DEFAULT_BASE_URL);
+    FALLBACK_BASE_URLS.forEach(push);
+    return candidates;
+}
+
+async function runWithBaseUrlFallback(params = {}, worker) {
+    const candidates = getBaseUrlCandidates(params);
+    let lastError = null;
+
+    for (const baseUrl of candidates) {
+        setRuntimeBaseUrl(baseUrl);
+        try {
+            const result = await worker(baseUrl);
+            try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: HEADERS.Cookie || "" }); } catch (e) {}
+            return result;
+        } catch (e) {
+            lastError = e;
+            console.warn(`[MissAV] ${baseUrl} 请求失败:`, e.message || e);
+            if (!isCloudflareOr403Error(e)) break;
+        }
+    }
+
+    if (isCloudflareOr403Error(lastError)) {
+        setRuntimeBaseUrl(params.baseUrl || DEFAULT_BASE_URL);
+        return buildCloudflareItem();
+    }
+    return buildErrorItem("加载失败", lastError && lastError.message ? lastError.message : lastError);
 }
 
 function getResponseStatus(resp) {
@@ -1553,6 +1624,10 @@ function resolveUrl(path) {
     const cleaned = String(path)
         .replace(/(https?:\/\/[^/]+)?\/dm\d+\//i, "$1/")
         .replace(/^dm\d+\//i, "");
+    if (/^https?:\/\/([^/]*\.)?missav\./i.test(cleaned)) {
+        const sitePath = cleaned.replace(/^https?:\/\/[^/]+/i, "") || "/";
+        return `${BASE_URL}${sitePath.startsWith("/") ? sitePath : `/${sitePath}`}`;
+    }
     if (cleaned.startsWith("http")) return cleaned;
     return `${BASE_URL}${cleaned.startsWith("/") ? cleaned : `/${cleaned}`}`;
 }
@@ -2186,20 +2261,21 @@ async function loadRecentUpdates(params = {}) {
 async function loadList(params = {}) {
     configureRuntime(params);
     const { endpoint = "dm632/cn/release", page = 1, sort_by = "", filters = "", primary_category = "", peopleId = "", genreId = "" } = params;
-    const targetEndpoint = resolveEndpointByPrimaryCategory(primary_category, endpoint);
-    const targetSort = isRecentUpdatesCategory(primary_category) ? (sort_by || "published_at") : sort_by;
 
-    let targetUrl = buildListUrl(targetEndpoint, page, filters, targetSort);
+    return await runWithBaseUrlFallback(params, async () => {
+        const targetEndpoint = resolveEndpointByPrimaryCategory(primary_category, endpoint);
+        const targetSort = isRecentUpdatesCategory(primary_category) ? (sort_by || "published_at") : sort_by;
 
-    if (peopleId) {
-        targetUrl = resolveUrl(String(peopleId));
-        if (page > 1) targetUrl += targetUrl.includes("?") ? `&page=${page}` : `?page=${page}`;
-    } else if (genreId) {
-        targetUrl = resolveUrl(String(genreId));
-        if (page > 1) targetUrl += targetUrl.includes("?") ? `&page=${page}` : `?page=${page}`;
-    }
+        let targetUrl = buildListUrl(targetEndpoint, page, filters, targetSort);
 
-    try {
+        if (peopleId) {
+            targetUrl = resolveUrl(String(peopleId));
+            if (page > 1) targetUrl += targetUrl.includes("?") ? `&page=${page}` : `?page=${page}`;
+        } else if (genreId) {
+            targetUrl = resolveUrl(String(genreId));
+            if (page > 1) targetUrl += targetUrl.includes("?") ? `&page=${page}` : `?page=${page}`;
+        }
+
         const currentPeopleId = peopleId ? normalizePeopleId(peopleId) : "";
         const currentPeopleTitle = peopleId ? decodeURIComponent(String(peopleId).split('/').pop() || '主演') : "";
         const res = await Widget.http.get(targetUrl, { headers: HEADERS });
@@ -2226,10 +2302,7 @@ async function loadList(params = {}) {
             currentPeople,
             currentGenre: genreId ? buildGenreContext(normalizeGenreId(genreId), decodeURIComponent(String(genreId).split('/').pop() || '分类')) : null
         });
-    } catch (e) {
-        console.error("[MissAV loadList] 失败:", e.message || e);
-        explainHttpError(e);
-    }
+    });
 }
 
 async function searchList(params = {}) {
@@ -2240,16 +2313,12 @@ async function searchList(params = {}) {
         return [{ id: "tip", type: "text", title: "请输入关键词开始搜索" }];
     }
 
-    let url = `${BASE_URL}/cn/search/${encodeURIComponent(keyword)}`;
-    if (page > 1) url += `?page=${page}`;
-
-    try {
+    return await runWithBaseUrlFallback(params, async () => {
+        let url = `${BASE_URL}/cn/search/${encodeURIComponent(keyword)}`;
+        if (page > 1) url += `?page=${page}`;
         const res = await Widget.http.get(url, { headers: HEADERS });
         return await parseVideoList(res.data);
-    } catch (e) {
-        console.error("[MissAV searchList] 失败:", e.message || e);
-        explainHttpError(e);
-    }
+    });
 }
 
 async function searchGlobal(params = {}) {
@@ -2260,16 +2329,12 @@ async function searchGlobal(params = {}) {
         return [{ id: "tip", type: "text", title: "请输入关键词开始全局搜索" }];
     }
 
-    let url = `${BASE_URL}/cn/search/${encodeURIComponent(keyword)}`;
-    if (page > 1) url += `?page=${page}`;
-
-    try {
+    return await runWithBaseUrlFallback(params, async () => {
+        let url = `${BASE_URL}/cn/search/${encodeURIComponent(keyword)}`;
+        if (page > 1) url += `?page=${page}`;
         const res = await Widget.http.get(url, { headers: HEADERS });
         return await parseVideoList(res.data, { includeImageFields: true });
-    } catch (e) {
-        console.error("[MissAV searchGlobal] 失败:", e.message || e);
-        explainHttpError(e);
-    }
+    });
 }
 
 async function loadResource(params = {}) {
@@ -2560,9 +2625,11 @@ function extractRelatedItems($, currentLink) {
 
 async function loadDetail(link) {
     configureRuntime({});
-    const detailLink = resolveUrl(link);
-    if (!detailLink) return null;
-    try {
+    const rawLink = link;
+    if (!rawLink) return null;
+    return await runWithBaseUrlFallback({}, async () => {
+        const detailLink = resolveUrl(rawLink);
+        if (!detailLink) return null;
         const res = await Widget.http.get(detailLink, { headers: HEADERS });
         const html = res.data;
         const $ = Widget.html.load(html);
@@ -2806,8 +2873,5 @@ async function loadDetail(link) {
             return [item];
         }
         return [{ id: "err", type: "text", title: "解析失败", description: "未找到播放地址", subTitle: "未找到播放地址" }];
-    } catch (e) {
-        console.error("[MissAV loadDetail] 失败:", e.message || e);
-        explainHttpError(e);
-    }
+    });
 }
