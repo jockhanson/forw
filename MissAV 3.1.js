@@ -37,6 +37,15 @@ WidgetMetadata = {
                 { title: "iPhone Safari", value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1" },
                 { title: "Mac Safari", value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15" }
             ]
+        },
+        {
+            name: "requestHeaders",
+            title: "完整请求头",
+            type: "input",
+            value: "",
+            placeholders: [
+                { title: "可选：从浏览器复制整段 Request Headers", value: "User-Agent: ...\nCookie: cf_clearance=..." }
+            ]
         }
     ],
     modules: [
@@ -371,8 +380,15 @@ const HEADERS = {
     "User-Agent": DEFAULT_USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
     "Referer": DEFAULT_BASE_URL + "/",
-    "Connection": "keep-alive"
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1"
 };
 
 const PEOPLE_AVATAR_CACHE = {};
@@ -388,14 +404,48 @@ function configureRuntime(params = {}) {
     const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
     setRuntimeBaseUrl(rawBaseUrl);
 
-    const cookie = normalizeCfCookie(params.cfCookie || saved.cfCookie || "");
+    const requestHeadersText = params.requestHeaders || saved.requestHeaders || params.cfCookie || saved.cfCookie || "";
+    const pastedHeaders = parseRequestHeaders(requestHeadersText);
+
+    const cookie = normalizeCfCookie(params.cfCookie || pastedHeaders.Cookie || pastedHeaders.cookie || saved.cfCookie || "");
     if (cookie) HEADERS.Cookie = cookie;
     else delete HEADERS.Cookie;
 
-    const userAgent = String(params.userAgent || saved.userAgent || DEFAULT_USER_AGENT).trim();
+    const userAgent = String(params.userAgent || pastedHeaders["User-Agent"] || pastedHeaders["user-agent"] || saved.userAgent || DEFAULT_USER_AGENT).trim();
     HEADERS["User-Agent"] = userAgent || DEFAULT_USER_AGENT;
 
-    try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie, userAgent: HEADERS["User-Agent"] }); } catch (e) {}
+    const acceptLanguage = String(pastedHeaders["Accept-Language"] || pastedHeaders["accept-language"] || saved.acceptLanguage || HEADERS["Accept-Language"]).trim();
+    HEADERS["Accept-Language"] = acceptLanguage || "zh-CN,zh;q=0.9,en;q=0.8";
+
+    try {
+        Widget.storage.set("missav.runtimeParams", {
+            baseUrl: BASE_URL,
+            cfCookie: cookie,
+            userAgent: HEADERS["User-Agent"],
+            acceptLanguage: HEADERS["Accept-Language"],
+            requestHeaders: params.requestHeaders || saved.requestHeaders || ""
+        });
+    } catch (e) {}
+}
+
+function parseRequestHeaders(value) {
+    const text = String(value || "");
+    const headers = {};
+    if (!text.includes(":")) return headers;
+
+    text.split(/\r?\n/).forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":")) return;
+        const index = trimmed.indexOf(":");
+        if (index <= 0) return;
+        const key = trimmed.slice(0, index).trim();
+        const val = trimmed.slice(index + 1).trim();
+        if (!key || !val) return;
+        headers[key] = val;
+        headers[key.toLowerCase()] = val;
+    });
+
+    return headers;
 }
 
 function normalizeCfCookie(value) {
@@ -524,7 +574,16 @@ async function runWithBaseUrlFallback(params = {}, worker) {
         setRuntimeBaseUrl(baseUrl);
         try {
             const result = await worker(baseUrl);
-            try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: HEADERS.Cookie || "", userAgent: HEADERS["User-Agent"] || DEFAULT_USER_AGENT }); } catch (e) {}
+            try {
+                const saved = Widget.storage.get("missav.runtimeParams") || {};
+                Widget.storage.set("missav.runtimeParams", {
+                    baseUrl: BASE_URL,
+                    cfCookie: HEADERS.Cookie || "",
+                    userAgent: HEADERS["User-Agent"] || DEFAULT_USER_AGENT,
+                    acceptLanguage: HEADERS["Accept-Language"],
+                    requestHeaders: saved.requestHeaders || ""
+                });
+            } catch (e) {}
             return result;
         } catch (e) {
             lastError = e;
