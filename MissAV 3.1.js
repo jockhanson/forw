@@ -26,6 +26,16 @@ WidgetMetadata = {
             placeholders: [
                 { title: "浏览器验证后的 Cookie", value: "cf_clearance=..." }
             ]
+        },
+        {
+            name: "userAgent",
+            title: "User-Agent",
+            type: "input",
+            value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+            placeholders: [
+                { title: "iPhone Safari", value: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1" },
+                { title: "Mac Safari", value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15" }
+            ]
         }
     ],
     modules: [
@@ -353,10 +363,11 @@ WidgetMetadata = {
 };
 
 const DEFAULT_BASE_URL = "https://missav.ai";
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
 let BASE_URL = DEFAULT_BASE_URL;
 let AVATAR_BASE_URL = DEFAULT_BASE_URL;
 const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    "User-Agent": DEFAULT_USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
     "Referer": DEFAULT_BASE_URL + "/",
@@ -380,7 +391,10 @@ function configureRuntime(params = {}) {
     if (cookie) HEADERS.Cookie = cookie;
     else delete HEADERS.Cookie;
 
-    try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie }); } catch (e) {}
+    const userAgent = String(params.userAgent || saved.userAgent || DEFAULT_USER_AGENT).trim();
+    HEADERS["User-Agent"] = userAgent || DEFAULT_USER_AGENT;
+
+    try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie, userAgent: HEADERS["User-Agent"] }); } catch (e) {}
 }
 
 function setRuntimeBaseUrl(value) {
@@ -446,10 +460,14 @@ function buildErrorItem(title, description) {
 }
 
 function buildCloudflareItem() {
-    const tried = FALLBACK_BASE_URLS.join(" / ");
+    const hasCookie = !!HEADERS.Cookie;
+    const tried = hasCookie ? BASE_URL : FALLBACK_BASE_URLS.join(" / ");
+    const cookieHint = hasCookie
+        ? "已检测到 Cookie 仍被拒绝，通常是 Cookie 过期、站点不匹配，或 User-Agent 与获取 Cookie 的浏览器不一致。请把获取 Cookie 时的浏览器 User-Agent 填入模块参数。"
+        : "请在浏览器打开站点通过验证后，把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。";
     return buildErrorItem(
         "Cloudflare 验证/403",
-        `已自动尝试 ${tried}，均被 Cloudflare/403 拦截。默认站点仍为 ${BASE_URL}。请在浏览器打开站点通过验证后，把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。`
+        `已尝试 ${tried}，仍被 Cloudflare/403 拦截。${cookieHint}`
     );
 }
 
@@ -464,6 +482,7 @@ function getBaseUrlCandidates(params = {}) {
     };
 
     push(params.baseUrl || BASE_URL || DEFAULT_BASE_URL);
+    if (HEADERS.Cookie) return candidates;
     FALLBACK_BASE_URLS.forEach(push);
     return candidates;
 }
@@ -476,7 +495,7 @@ async function runWithBaseUrlFallback(params = {}, worker) {
         setRuntimeBaseUrl(baseUrl);
         try {
             const result = await worker(baseUrl);
-            try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: HEADERS.Cookie || "" }); } catch (e) {}
+            try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: HEADERS.Cookie || "", userAgent: HEADERS["User-Agent"] || DEFAULT_USER_AGENT }); } catch (e) {}
             return result;
         } catch (e) {
             lastError = e;
