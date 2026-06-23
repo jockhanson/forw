@@ -52,6 +52,7 @@ WidgetMetadata = {
         {
             title: "最近更新",
             functionName: "loadRecentUpdates",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" }
             ]
@@ -59,6 +60,7 @@ WidgetMetadata = {
         {
             title: "中文字幕",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm278/cn/chinese-subtitle", enumOptions: [{ title: "中文字幕", value: "dm278/cn/chinese-subtitle" }] },
@@ -74,6 +76,7 @@ WidgetMetadata = {
         {
             title: "日本AV",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm632/cn/release", enumOptions: [
@@ -95,6 +98,7 @@ WidgetMetadata = {
         {
             title: "素人",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm36/cn/siro", enumOptions: [
@@ -119,6 +123,7 @@ WidgetMetadata = {
         {
             title: "无码影片",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm816/cn/uncensored-leak", enumOptions: [
@@ -151,6 +156,7 @@ WidgetMetadata = {
         {
             title: "亚洲AV",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm63/cn/madou", enumOptions: [
@@ -174,6 +180,7 @@ WidgetMetadata = {
         {
             title: "女优",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm179/cn/actresses/%E7%80%AC%E6%88%B8%E7%92%B0%E5%A5%88", enumOptions: [
@@ -238,6 +245,7 @@ WidgetMetadata = {
         {
             title: "类型",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm96/cn/genres/%E9%AB%98%E6%B8%85", enumOptions: [
@@ -292,6 +300,7 @@ WidgetMetadata = {
         {
             title: "发行商",
             functionName: "loadList",
+            requiresWebView: true,
             params: [
                 { name: "page", title: "页码", type: "page" },
                 { name: "endpoint", title: "endpoint", type: "enumeration", value: "dm825/cn/makers/Moody%27s", enumOptions: [
@@ -346,6 +355,7 @@ WidgetMetadata = {
         {
             title: "🔍 搜索视频",
             functionName: "searchList",
+            requiresWebView: true,
             params: [
                 { name: "keyword", title: "关键词", type: "input", value: "" },
                 { name: "page", title: "页码", type: "page" }
@@ -365,6 +375,7 @@ WidgetMetadata = {
     search: {
         title: "🌐 全局搜索",
         functionName: "searchGlobal",
+        requiresWebView: true,
         params: [
             { name: "keyword", title: "关键词", type: "input", description: "搜索的关键词", value: "" },
             { name: "page", title: "页码", type: "page", value: "1" }
@@ -406,12 +417,14 @@ function configureRuntime(params = {}) {
 
     const requestHeadersText = params.requestHeaders || saved.requestHeaders || params.cfCookie || saved.cfCookie || "";
     const pastedHeaders = parseRequestHeaders(requestHeadersText);
+    applyRequestHeaderOverrides(pastedHeaders);
 
-    const cookie = normalizeCfCookie(params.cfCookie || pastedHeaders.Cookie || pastedHeaders.cookie || saved.cfCookie || "");
+    const pastedCookie = pastedHeaders.Cookie || pastedHeaders.cookie || "";
+    const cookie = normalizeCfCookie(pastedCookie || params.cfCookie || saved.cfCookie || "");
     if (cookie) HEADERS.Cookie = cookie;
     else delete HEADERS.Cookie;
 
-    const userAgent = String(params.userAgent || pastedHeaders["User-Agent"] || pastedHeaders["user-agent"] || saved.userAgent || DEFAULT_USER_AGENT).trim();
+    const userAgent = String(pastedHeaders["User-Agent"] || pastedHeaders["user-agent"] || params.userAgent || saved.userAgent || DEFAULT_USER_AGENT).trim();
     HEADERS["User-Agent"] = userAgent || DEFAULT_USER_AGENT;
 
     const acceptLanguage = String(pastedHeaders["Accept-Language"] || pastedHeaders["accept-language"] || saved.acceptLanguage || HEADERS["Accept-Language"]).trim();
@@ -446,6 +459,28 @@ function parseRequestHeaders(value) {
     });
 
     return headers;
+}
+
+function applyRequestHeaderOverrides(headers) {
+    const allowed = [
+        "Accept",
+        "Accept-Language",
+        "Cache-Control",
+        "Pragma",
+        "Sec-CH-UA",
+        "Sec-CH-UA-Mobile",
+        "Sec-CH-UA-Platform",
+        "Sec-Fetch-Dest",
+        "Sec-Fetch-Mode",
+        "Sec-Fetch-Site",
+        "Sec-Fetch-User",
+        "Upgrade-Insecure-Requests"
+    ];
+
+    allowed.forEach((name) => {
+        const value = headers[name] || headers[name.toLowerCase()];
+        if (value) HEADERS[name] = value;
+    });
 }
 
 function normalizeCfCookie(value) {
@@ -542,11 +577,11 @@ function buildCloudflareItem() {
     const hasCookie = !!HEADERS.Cookie;
     const tried = hasCookie ? BASE_URL : FALLBACK_BASE_URLS.join(" / ");
     const cookieHint = hasCookie
-        ? "已检测到 Cookie 仍被拒绝，通常是 Cookie 过期、站点不匹配，或 User-Agent 与获取 Cookie 的浏览器不一致。请把获取 Cookie 时的浏览器 User-Agent 填入模块参数。"
-        : "请在浏览器打开站点通过验证后，把 Cookie 填入模块参数“Cloudflare Cookie”（至少包含 cf_clearance）。";
+        ? "已检测到 Cookie 仍被拒绝。请优先把浏览器开发者工具里的整段 Request Headers 粘到模块参数“完整请求头”。如果仍失败，说明当前 App 的 Widget.http 没有共享 WebView 验证会话。"
+        : "请在 App/浏览器打开站点通过验证后，把 Cookie 或整段 Request Headers 填入模块参数。";
     return buildErrorItem(
         "Cloudflare 验证/403",
-        `已尝试 ${tried}，仍被 Cloudflare/403 拦截。${cookieHint}`
+        `已尝试 ${tried}，仍被 Cloudflare/403 拦截。模块已启用 requiresWebView。${cookieHint}`
     );
 }
 
