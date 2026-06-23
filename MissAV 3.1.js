@@ -24,7 +24,8 @@ WidgetMetadata = {
             type: "input",
             value: "",
             placeholders: [
-                { title: "浏览器验证后的 Cookie", value: "cf_clearance=..." }
+                { title: "完整 Cookie", value: "cf_clearance=..." },
+                { title: "仅 cf_clearance 值", value: "粘贴 cf_clearance 的 value 也可以" }
             ]
         },
         {
@@ -387,7 +388,7 @@ function configureRuntime(params = {}) {
     const rawBaseUrl = params.baseUrl || saved.baseUrl || BASE_URL || DEFAULT_BASE_URL;
     setRuntimeBaseUrl(rawBaseUrl);
 
-    const cookie = String(params.cfCookie || saved.cfCookie || "").trim();
+    const cookie = normalizeCfCookie(params.cfCookie || saved.cfCookie || "");
     if (cookie) HEADERS.Cookie = cookie;
     else delete HEADERS.Cookie;
 
@@ -395,6 +396,34 @@ function configureRuntime(params = {}) {
     HEADERS["User-Agent"] = userAgent || DEFAULT_USER_AGENT;
 
     try { Widget.storage.set("missav.runtimeParams", { baseUrl: BASE_URL, cfCookie: cookie, userAgent: HEADERS["User-Agent"] }); } catch (e) {}
+}
+
+function normalizeCfCookie(value) {
+    let cookie = String(value || "").trim();
+    if (!cookie) return "";
+
+    cookie = cookie
+        .replace(/^[Cc]ookie\s*:\s*/, "")
+        .replace(/^["']|["']$/g, "")
+        .trim();
+
+    try {
+        if (/%3D|%3B/i.test(cookie)) cookie = decodeURIComponent(cookie);
+    } catch (e) {}
+
+    cookie = cookie.replace(/\r?\n/g, "; ").replace(/\s*;\s*/g, "; ").trim();
+
+    if (!cookie.includes("=")) {
+        return `cf_clearance=${cookie}`;
+    }
+
+    const parts = cookie.split(";").map((part) => part.trim()).filter(Boolean);
+    const clearanceIndex = parts.findIndex((part) => part.toLowerCase().startsWith("cf_clearance="));
+    if (clearanceIndex > 0) {
+        const clearance = parts.splice(clearanceIndex, 1)[0];
+        parts.unshift(clearance);
+    }
+    return parts.join("; ");
 }
 
 function setRuntimeBaseUrl(value) {
