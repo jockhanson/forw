@@ -130,7 +130,7 @@ async function loadResource(params = {}) {
     const html = await fetchPage(href, runtimeParams);
     const sources = await collectPlayableSources(html, href, getOrigin(href) || runtimeParams.baseUrl, runtimeParams);
     return sources.map((source, index) => ({
-      name: playbackName(source.url, index),
+      name: source.name || playbackName(source.url, index),
       description: source.source || "18AV",
       url: source.url,
       customHeaders: mediaHeaders(runtimeParams, href),
@@ -258,7 +258,14 @@ async function collectPlayableSources(html, referer, baseUrl, params = {}) {
   for (const playerUrl of playerUrls) {
     try {
       const resolved = await resolvePlayerPage(playerUrl.url, params, referer, 0);
-      for (const item of resolved) candidates.push({ url: item.url, source: playerUrl.name || item.source });
+      for (const item of resolved) {
+        candidates.push({
+          url: item.url,
+          source: playerUrl.name || item.source,
+          name: playerUrl.name || item.name,
+          score: numericScore(playerUrl.score) + numericScore(item.score),
+        });
+      }
     } catch (error) {
       console.log("[18av][stream] 播放源解析失败:", playerUrl.url, error.message || error);
     }
@@ -266,7 +273,7 @@ async function collectPlayableSources(html, referer, baseUrl, params = {}) {
 
   return uniqueCandidates(candidates)
     .filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url))
-    .sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
+    .sort((a, b) => candidateScore(b) - candidateScore(a));
 }
 
 async function resolvePlayerPage(url, params = {}, referer, depth) {
@@ -301,13 +308,15 @@ function extractPlayerFrameUrls(html, baseUrl) {
     if (!decrypted) continue;
     const url = absolutize(prefix + decrypted + suffix, baseUrl);
     if (!url) continue;
-    const resolution = firstByRe(url, /[?&]numresolution=(\d+)/i);
+    const resolutionText = firstByRe(url, /[?&]numresolution=(\d+)/i);
+    const resolution = Number(resolutionText);
     frames.push({
-      name: resolution ? resolution + "P" : match[2],
+      name: resolution > 0 ? resolution + "P" : match[2],
       url,
+      score: resolution > 0 ? resolution * 10000 : 0,
     });
   }
-  return frames;
+  return frames.sort((a, b) => numericScore(b.score) - numericScore(a.score));
 }
 
 function extractCipherConfig(html) {
@@ -869,9 +878,24 @@ function uniqueCandidates(candidates) {
   const out = [];
   for (const candidate of candidates || []) {
     const url = String((candidate && candidate.url) || "").split("#")[0];
-    if (!url || seen[url]) continue;
-    seen[url] = true;
-    out.push({ url, source: candidate.source || "18AV" });
+    if (!url) continue;
+    const score = numericScore(candidate && candidate.score);
+    if (seen[url]) {
+      if (score > seen[url].score) {
+        seen[url].score = score;
+        seen[url].source = candidate.source || seen[url].source;
+        seen[url].name = candidate.name || seen[url].name;
+      }
+      continue;
+    }
+    const record = {
+      url,
+      source: candidate.source || "18AV",
+      name: candidate.name || "",
+      score,
+    };
+    seen[url] = record;
+    out.push(record);
   }
   return out;
 }
@@ -896,6 +920,15 @@ function mediaScore(url) {
   score += resolutionScore(value) * 1000;
   if (/preview|sample|trailer|teaser|promo/i.test(value)) score -= 10000000;
   return score;
+}
+
+function candidateScore(candidate) {
+  return mediaScore(candidate && candidate.url) + numericScore(candidate && candidate.score);
+}
+
+function numericScore(value) {
+  const score = Number(value || 0);
+  return Number.isFinite(score) ? score : 0;
 }
 
 function resolutionScore(value) {
