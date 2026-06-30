@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.javguru",
   title: "JavGuru",
-  version: "1.0.1",
+  version: "1.0.2",
   requiredVersion: "0.0.1",
   description: "JavGuru list, search, detail and playable stream module",
   author: "Forward",
@@ -58,6 +58,7 @@ WidgetMetadata = {
 
 const DEFAULT_BASE_URL = "https://jav.guru";
 const RUNTIME_KEY = "javguru.runtimeParams";
+const SOURCE_CACHE_TTL = 10 * 60 * 1000;
 
 async function loadList(params = {}) {
   try {
@@ -119,18 +120,25 @@ async function loadResource(params = {}) {
         customHeaders: mediaHeaders(runtimeParams, params.referer || params.link || runtimeParams.baseUrl + "/"),
       }] : [];
     }
+    const cachedSources = getSourceCache(href);
+    if (cachedSources.length) return toResourceItems(cachedSources, runtimeParams, href);
     const html = await fetchPage(href, runtimeParams);
     const candidates = await collectPlayableSources(html, href, getOrigin(href) || runtimeParams.baseUrl, runtimeParams);
-    return candidates.map((candidate, index) => ({
-      name: playbackName(candidate.url, index),
-      description: candidate.source || "JavGuru",
-      url: candidate.url,
-      customHeaders: mediaHeaders(runtimeParams, candidate.referer || href),
-    }));
+    rememberSourceCache(href, candidates);
+    return toResourceItems(candidates, runtimeParams, href);
   } catch (error) {
     console.error("[javguru][loadResource] 失败:", error.message || error);
     return [];
   }
+}
+
+function toResourceItems(candidates, runtimeParams, href) {
+  return (candidates || []).map((candidate, index) => ({
+      name: playbackName(candidate.url, index, candidate.resolution),
+      description: candidate.source || "JavGuru",
+      url: candidate.url,
+      customHeaders: mediaHeaders(runtimeParams, candidate.referer || href),
+    }));
 }
 
 async function fetchPage(url, params = {}, referer) {
@@ -207,6 +215,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     .filter((item) => decodeDetailLink(item.link).split("#")[0] !== href.split("#")[0])
     .slice(0, 24);
   const sources = await collectPlayableSources(html, href, baseUrl, params);
+  rememberSourceCache(href, sources);
   const descriptionParts = [];
   if (code) descriptionParts.push("Code: " + code);
   if (releaseDate) descriptionParts.push("Release Date: " + releaseDate);
@@ -225,7 +234,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     videoUrl: sources[0] ? sources[0].url : "",
     previewUrl: poster,
     link: encodeDetailLink(href),
-    playerType: "system",
+    playerType: "ijk",
     customHeaders: mediaHeaders(params, sources[0] ? (sources[0].referer || href) : href),
     genreItems: genres,
     peoples,
@@ -234,24 +243,170 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
   };
 }
 
-async function collectPlayableSources(html, referer, baseUrl, params = {}) {
+async function collectPlayableSources(html, referer, baseUrl, params = {}, options = {}) {
   const candidates = [];
   const direct = extractMediaCandidates(html, baseUrl);
   for (const item of direct) candidates.push(withCandidateMeta(item, 1000, referer));
 
-  const buttons = extractStreamButtons(html, baseUrl);
-  for (let index = 0; index < buttons.length; index++) {
-    const button = buttons[index];
-    try {
-      const resolved = await resolveStreamButton(button, referer, params);
-      for (const item of resolved) candidates.push(withCandidateMeta(item, index, item.referer || referer));
-    } catch (error) {
-      console.log("[javguru][stream] 播放源解析失败:", button.name, error.message || error);
+  const buttons = sortStreamButtons(extractStreamButtons(html, baseUrl));
+  const fastButtons = buttons.filter((button) => !isSlowStreamButton(button));
+  const slowButtons = buttons.filter((button) => isSlowStreamButton(button));
+
+  await collectFromButtons(fastButtons);
+  if (!candidates.some((candidate) => isPlayableCandidate(candidate.url)) && slowButtons.length) {
+    await collectFromButtons(slowButtons);
+  }
+
+  const expanded = await expandHighestQualityCandidates(
+    uniqueCandidates(candidates).filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url)),
+    params,
+    options
+  );
+  const sorted = uniqueCandidates(expanded)
+    .filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url))
+    .sort((a, b) => candidateScore(b) - candidateScore(a) || candidateOrder(a) - candidateOrder(b));
+  const maxSources = Number(options.maxSources || 0);
+  return maxSources > 0 ? sorted.slice(0, maxSources) : sorted;
+
+  async function collectFromButtons(list) {
+    if (!options.quick) {
+      const jobs = (list || []).map((button) => resolveStreamButton(button, referer, params)
+        .then((resolved) => ({ button, resolved }))
+        .catch((error) => {
+          console.log("[javguru][stream] 播放源解析失败:", button.name, error.message || error);
+          return null;
+        }));
+      const results = await Promise.all(jobs);
+      for (const result of results) {
+        if (!result) continue;
+        const order = streamButtonOrder(result.button);
+        for (const item of result.resolved) candidates.push(withCandidateMeta(item, order, item.referer || referer));
+      }
+      return;
+    }
+
+    for (let index = 0; index < list.length; index++) {
+      const button = list[index];
+      const order = streamButtonOrder(button);
+      try {
+        const resolved = await resolveStreamButton(button, referer, params);
+        for (const item of resolved) candidates.push(withCandidateMeta(item, order, item.referer || referer));
+        if (options.quick && candidates.some((candidate) => isPlayableCandidate(candidate.url))) break;
+      } catch (error) {
+        console.log("[javguru][stream] 播放源解析失败:", button.name, error.message || error);
+      }
     }
   }
-  return uniqueCandidates(candidates)
-    .filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url))
-    .sort((a, b) => candidateOrder(a) - candidateOrder(b) || mediaScore(b.url) - mediaScore(a.url));
+}
+
+function sortStreamButtons(buttons) {
+  return (buttons || []).slice().sort((a, b) => streamButtonOrder(a) - streamButtonOrder(b));
+}
+
+function streamButtonOrder(button) {
+  const name = String((button && button.name) || "").toUpperCase();
+  const order = ["STREAM TV", "STREAM LU", "STREAM JK", "STREAM SB"];
+  for (let i = 0; i < order.length; i++) {
+    if (name.indexOf(order[i]) !== -1) return i;
+  }
+  if (isSlowStreamButton(button)) return 100;
+  return 50;
+}
+
+function isSlowStreamButton(button) {
+  return /STREAM\s+(VO|DD)\b/i.test(String((button && button.name) || ""));
+}
+
+async function expandHighestQualityCandidates(candidates, params = {}, options = {}) {
+  const out = [];
+  const jobs = (candidates || []).map((candidate) => resolveHighestQualityCandidate(candidate, params)
+    .catch(() => [candidate]));
+  const groups = await Promise.all(jobs);
+  for (const expanded of groups) {
+    for (const item of expanded) out.push(item);
+  }
+  return out;
+}
+
+async function resolveHighestQualityCandidate(candidate, params = {}) {
+  if (!candidate || !/\.m3u8(?:[?#]|$)/i.test(candidate.url)) return [candidate];
+  const playlist = await fetchPlaylist(candidate.url, params, candidate.referer);
+  const variant = bestHlsVariant(playlist, candidate.url);
+  if (!variant || !variant.url || variant.url === candidate.url) return [candidate];
+  const best = {
+    url: variant.url,
+    source: candidate.source ? candidate.source + ":" + variant.resolution + "p" : variant.resolution + "p",
+    referer: candidate.referer,
+    order: candidate.order,
+    resolution: variant.resolution,
+    bandwidth: variant.bandwidth,
+  };
+  return [best, candidate];
+}
+
+async function fetchPlaylist(url, params = {}, referer) {
+  const res = await Widget.http.get(url, { headers: mediaHeaders(params, referer || params.baseUrl || DEFAULT_BASE_URL) });
+  return String((res && res.data) || "");
+}
+
+function bestHlsVariant(playlist, playlistUrl) {
+  const variants = parseHlsVariants(playlist, playlistUrl);
+  if (!variants.length) return null;
+  const hasAudioMedia = /#EXT-X-MEDIA:[^\n]*TYPE=AUDIO/i.test(String(playlist || ""));
+  const safeVariants = variants.filter((variant) => hlsVariantKeepsAudio(variant, hasAudioMedia));
+  if (!safeVariants.length) return null;
+  safeVariants.sort((a, b) => (b.resolution || 0) - (a.resolution || 0) || (b.bandwidth || 0) - (a.bandwidth || 0));
+  return safeVariants[0] || null;
+}
+
+function parseHlsVariants(playlist, playlistUrl) {
+  const lines = String(playlist || "").split(/\r?\n/);
+  const variants = [];
+  let pending = null;
+  for (const line of lines) {
+    const value = String(line || "").trim();
+    if (!value) continue;
+    if (/^#EXT-X-STREAM-INF/i.test(value)) {
+      pending = {
+        bandwidth: Number(attributeValue(value, "BANDWIDTH")) || 0,
+        resolution: resolutionScore(value),
+        codecs: attributeValue(value, "CODECS"),
+        audio: attributeValue(value, "AUDIO"),
+      };
+      continue;
+    }
+    if (pending && value.charAt(0) !== "#") {
+      variants.push({
+        url: absolutizeM3u8Variant(value, playlistUrl),
+        bandwidth: pending.bandwidth,
+        resolution: pending.resolution,
+        codecs: pending.codecs,
+        audio: pending.audio,
+      });
+      pending = null;
+    }
+  }
+  return variants;
+}
+
+function hlsVariantKeepsAudio(variant, masterHasAudioMedia) {
+  if (!variant) return false;
+  if (masterHasAudioMedia || variant.audio) return false;
+  const codecs = String(variant.codecs || "");
+  return !codecs || /(?:mp4a|ac-3|ec-3|opus)/i.test(codecs);
+}
+
+function attributeValue(line, name) {
+  const re = new RegExp("\\b" + escapeRegExp(name) + "=((?:\"[^\"]+\")|[^,\\s]+)", "i");
+  const match = String(line || "").match(re);
+  return match ? String(match[1] || "").replace(/^"|"$/g, "") : "";
+}
+
+function absolutizeM3u8Variant(value, playlistUrl) {
+  const base = String(playlistUrl || "").substring(0, String(playlistUrl || "").lastIndexOf("/") + 1);
+  const url = absolutize(value, base || playlistUrl);
+  const query = String(playlistUrl || "").includes("?") ? String(playlistUrl).slice(String(playlistUrl).indexOf("?")) : "";
+  return query && url && !url.includes("?") ? url + query : url;
 }
 
 function extractStreamButtons(html, baseUrl) {
@@ -560,6 +715,25 @@ function getRuntimeParams() {
   return Widget.storage.get(RUNTIME_KEY) || { baseUrl: DEFAULT_BASE_URL, cfCookie: "", userAgent: "" };
 }
 
+function sourceCacheKey(href) {
+  return "javguru.sources:" + stableId(href);
+}
+
+function rememberSourceCache(href, sources) {
+  if (!href || !sources || !sources.length) return;
+  Widget.storage.set(sourceCacheKey(href), {
+    time: Date.now(),
+    sources,
+  });
+}
+
+function getSourceCache(href) {
+  const cached = href ? Widget.storage.get(sourceCacheKey(href)) : null;
+  if (!cached || !Array.isArray(cached.sources)) return [];
+  if (Date.now() - Number(cached.time || 0) > SOURCE_CACHE_TTL) return [];
+  return cached.sources;
+}
+
 function normalizeBaseUrl(url) {
   return String(url || DEFAULT_BASE_URL).trim().replace(/\/+$/, "") || DEFAULT_BASE_URL;
 }
@@ -711,6 +885,8 @@ function uniqueCandidates(candidates) {
       source: candidate.source || "JavGuru",
       referer: candidate.referer || "",
       order: candidate.order,
+      resolution: candidate.resolution,
+      bandwidth: candidate.bandwidth,
     });
   }
   return out;
@@ -722,12 +898,20 @@ function withCandidateMeta(candidate, order, referer) {
     source: candidate.source,
     referer: candidate.referer || referer || "",
     order,
+    resolution: candidate.resolution,
+    bandwidth: candidate.bandwidth,
   };
 }
 
 function candidateOrder(candidate) {
   const order = Number(candidate && candidate.order);
   return Number.isFinite(order) ? order : 9999;
+}
+
+function candidateScore(candidate) {
+  const resolution = Number(candidate && candidate.resolution) || 0;
+  const bandwidth = Number(candidate && candidate.bandwidth) || 0;
+  return mediaScore((candidate && candidate.url) || "") + resolution * 10000 + bandwidth / 1000;
 }
 
 function unique(list) {
@@ -761,8 +945,8 @@ function resolutionScore(value) {
   return Number.isFinite(fromResolution) ? fromResolution : 0;
 }
 
-function playbackName(url, index) {
-  const res = resolutionScore(url);
+function playbackName(url, index, resolution) {
+  const res = Number(resolution || 0) || resolutionScore(url);
   if (res) return `${res}P 正片`;
   if (/\.m3u8(?:[?#]|$)/i.test(url)) return index === 0 ? "HLS 正片" : `HLS 备用 ${index + 1}`;
   if (/\.mp4(?:[?#]|$)/i.test(url)) return index === 0 ? "MP4 正片" : `MP4 备用 ${index + 1}`;
