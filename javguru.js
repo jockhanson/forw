@@ -1,35 +1,12 @@
 WidgetMetadata = {
   id: "forward.javguru",
   title: "JavGuru",
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.1",
   description: "JavGuru list, search, detail and playable stream module",
   author: "Forward",
   site: "https://jav.guru/",
   detailCacheDuration: 60,
-  globalParams: [
-    {
-      name: "baseUrl",
-      title: "站点地址",
-      type: "input",
-      value: "https://jav.guru",
-      placeholders: [{ title: "JavGuru", value: "https://jav.guru" }],
-    },
-    {
-      name: "cfCookie",
-      title: "Cloudflare Cookie",
-      type: "input",
-      value: "",
-      placeholders: [{ title: "浏览器通过验证后的 Cookie", value: "cf_clearance=..." }],
-    },
-    {
-      name: "userAgent",
-      title: "User-Agent",
-      type: "input",
-      value: "",
-      placeholders: [{ title: "留空使用默认浏览器 UA", value: "" }],
-    },
-  ],
   modules: [
     {
       id: "loadList",
@@ -132,15 +109,23 @@ async function loadResource(params = {}) {
       cfCookie: params.cfCookie || saved.cfCookie,
       userAgent: params.userAgent || saved.userAgent,
     });
+    const directUrl = directPlayableParam(params);
     const href = inferDetailHref(params, runtimeParams.baseUrl);
-    if (!href) return [];
+    if (!href) {
+      return directUrl ? [{
+        name: playbackName(directUrl, 0),
+        description: "JavGuru",
+        url: directUrl,
+        customHeaders: mediaHeaders(runtimeParams, params.referer || params.link || runtimeParams.baseUrl + "/"),
+      }] : [];
+    }
     const html = await fetchPage(href, runtimeParams);
     const candidates = await collectPlayableSources(html, href, getOrigin(href) || runtimeParams.baseUrl, runtimeParams);
     return candidates.map((candidate, index) => ({
       name: playbackName(candidate.url, index),
       description: candidate.source || "JavGuru",
       url: candidate.url,
-      customHeaders: mediaHeaders(runtimeParams, href),
+      customHeaders: mediaHeaders(runtimeParams, candidate.referer || href),
     }));
   } catch (error) {
     console.error("[javguru][loadResource] 失败:", error.message || error);
@@ -155,7 +140,7 @@ async function fetchPage(url, params = {}, referer) {
   } catch (error) {
     const message = String((error && error.message) || error || "");
     if (message.includes("403")) {
-      throw new Error("目标站点返回 403/Cloudflare 验证。请在浏览器通过验证后把 Cookie 填入 Cloudflare Cookie 参数");
+      throw new Error("目标站点返回 403/Cloudflare 验证或播放源拒绝访问");
     }
     if (message.includes("404")) throw new Error("HTTP_404:" + url);
     throw error;
@@ -163,7 +148,7 @@ async function fetchPage(url, params = {}, referer) {
   const html = String((res && res.data) || "");
   if (!html) throw new Error("空响应: " + url);
   if (html.includes("cf_chl_") || html.includes("Just a moment...")) {
-    throw new Error("目标站点返回 Cloudflare 验证页。请填写浏览器通过验证后的 Cloudflare Cookie");
+    throw new Error("目标站点返回 Cloudflare 验证页");
   }
   return html;
 }
@@ -241,7 +226,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     previewUrl: poster,
     link: encodeDetailLink(href),
     playerType: "system",
-    customHeaders: mediaHeaders(params, href),
+    customHeaders: mediaHeaders(params, sources[0] ? (sources[0].referer || href) : href),
     genreItems: genres,
     peoples,
     relatedItems,
@@ -252,20 +237,21 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
 async function collectPlayableSources(html, referer, baseUrl, params = {}) {
   const candidates = [];
   const direct = extractMediaCandidates(html, baseUrl);
-  for (const item of direct) candidates.push(item);
+  for (const item of direct) candidates.push(withCandidateMeta(item, 1000, referer));
 
   const buttons = extractStreamButtons(html, baseUrl);
-  for (const button of buttons) {
+  for (let index = 0; index < buttons.length; index++) {
+    const button = buttons[index];
     try {
       const resolved = await resolveStreamButton(button, referer, params);
-      for (const item of resolved) candidates.push(item);
+      for (const item of resolved) candidates.push(withCandidateMeta(item, index, item.referer || referer));
     } catch (error) {
       console.log("[javguru][stream] 播放源解析失败:", button.name, error.message || error);
     }
   }
   return uniqueCandidates(candidates)
     .filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url))
-    .sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
+    .sort((a, b) => candidateOrder(a) - candidateOrder(b) || mediaScore(b.url) - mediaScore(a.url));
 }
 
 function extractStreamButtons(html, baseUrl) {
@@ -305,13 +291,13 @@ async function resolveStreamButton(button, referer, params = {}) {
   const candidates = [];
   const firstHtml = await fetchPage(button.url, params, referer);
   const firstDirect = extractMediaCandidates(firstHtml, button.url);
-  for (const item of firstDirect) candidates.push({ url: item.url, source: button.name + ":" + item.source });
+  for (const item of firstDirect) candidates.push({ url: item.url, source: button.name + ":" + item.source, referer: button.url });
 
   const secondUrl = buildSearchoRealUrl(firstHtml, button.url);
   if (secondUrl) {
     const secondHtml = await fetchPage(secondUrl, params, button.url);
     const media = extractMediaCandidates(secondHtml, secondUrl);
-    for (const item of media) candidates.push({ url: item.url, source: button.name + ":" + item.source });
+    for (const item of media) candidates.push({ url: item.url, source: button.name + ":" + item.source, referer: secondUrl });
   }
   return uniqueCandidates(candidates);
 }
@@ -461,7 +447,12 @@ function pathMatchesPrefix(path, prefixes) {
 }
 
 function inferDetailHref(params = {}, baseUrl) {
-  return normalizeJavGuruUrl(decodeDetailLink(params.link || params.url || params.href || params.id || params.videoUrl), baseUrl);
+  const candidates = [params.link, params.href, params.pageUrl, params.url, params.id];
+  for (const candidate of candidates) {
+    const decoded = decodeDetailLink(candidate);
+    if (isJavGuruDetailUrl(decoded)) return normalizeJavGuruUrl(decoded, baseUrl);
+  }
+  return "";
 }
 
 function encodeDetailLink(href) {
@@ -472,6 +463,21 @@ function decodeDetailLink(link) {
   const value = String(link || "").trim();
   if (!value) return "";
   return value.startsWith("detail:") ? value.slice("detail:".length) : value;
+}
+
+function directPlayableParam(params = {}) {
+  const values = [params.videoUrl, params.url, params.src, params.file];
+  for (const value of values) {
+    const url = String(value || "").trim();
+    if (isPlayableCandidate(url) && !isPreviewUrl(url)) return url;
+  }
+  return "";
+}
+
+function isJavGuruDetailUrl(value) {
+  const url = String(value || "");
+  if (!/^https?:\/\/(?:www\.)?jav\.guru\/\d+\//i.test(url)) return false;
+  return !isPlayableCandidate(url) && url.indexOf("/searcho/") === -1;
 }
 
 function pageUrl(baseUrl, route, page) {
@@ -687,9 +693,10 @@ function isPlayableCandidate(url) {
   const value = String(url || "").trim();
   if (!value || value.startsWith("data:")) return false;
   if (/\.(?:jpg|jpeg|png|webp|gif|svg|css|js|ico)(?:[?#]|$)/i.test(value)) return false;
-  if (/\/(?:ads?|banner|analytics|captcha|cdn-cgi)\b/i.test(value)) return false;
+  if (/\/(?:ads?|banner|analytics|captcha|cdn-cgi|wp-json|oembed)\b/i.test(value)) return false;
+  if (/(?:test-videos\.co\.uk|big_buck_bunny|google|yandex|doubleclick|googletagmanager)/i.test(value)) return false;
   return /\.(?:m3u8|mp4|webm)(?:[?#]|$)/i.test(value) ||
-    /\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|player|embed|source|file)(?:[\/?#]|$)/i.test(value);
+    /\/(?:get_file|stream|video|media|hls|playlist|master|player|embed|source|file)(?:[\/?#]|$)/i.test(value);
 }
 
 function uniqueCandidates(candidates) {
@@ -699,9 +706,28 @@ function uniqueCandidates(candidates) {
     const url = String((candidate && candidate.url) || "").split("#")[0];
     if (!url || seen[url]) continue;
     seen[url] = true;
-    out.push({ url, source: candidate.source || "JavGuru" });
+    out.push({
+      url,
+      source: candidate.source || "JavGuru",
+      referer: candidate.referer || "",
+      order: candidate.order,
+    });
   }
   return out;
+}
+
+function withCandidateMeta(candidate, order, referer) {
+  return {
+    url: candidate.url,
+    source: candidate.source,
+    referer: candidate.referer || referer || "",
+    order,
+  };
+}
+
+function candidateOrder(candidate) {
+  const order = Number(candidate && candidate.order);
+  return Number.isFinite(order) ? order : 9999;
 }
 
 function unique(list) {
