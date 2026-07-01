@@ -76,6 +76,36 @@ WidgetMetadata = {
       requiresWebView: false,
       params: [],
     },
+    {
+      id: "loadActresses",
+      title: "女优分类",
+      functionName: "loadActresses",
+      cacheDuration: 3600,
+      requiresWebView: false,
+      params: [
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadMakers",
+      title: "片商分类",
+      functionName: "loadMakers",
+      cacheDuration: 3600,
+      requiresWebView: false,
+      params: [
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadTags",
+      title: "分类",
+      functionName: "loadTags",
+      cacheDuration: 3600,
+      requiresWebView: false,
+      params: [
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
   ],
   search: {
     title: "搜索",
@@ -141,6 +171,9 @@ async function search(params = {}) {
 
 async function loadDetail(link) {
   try {
+    const entityRoute = decodeEntityLink(link);
+    if (entityRoute) return await loadEntityDetail(entityRoute);
+
     const videoId = decodeDetailLink(link);
     if (!videoId) return null;
     const runtimeParams = getRuntimeParams();
@@ -192,18 +225,53 @@ async function loadResource(params = {}) {
       ip: geo.ip,
       token_v2: geo.token_v2,
     });
-    const src = playlistSource(playlist);
-    if (!src) return [];
+    const sources = playlistSources(playlistSource(playlist));
+    if (!sources.length) return [];
 
-    return [{
-      name: playbackName(src, 0),
-      description: "AV01",
-      url: src,
+    return sources.map((source, index) => ({
+      name: playbackName(source.url, index, source.quality, index === 0),
+      description: sourceDescription(source, index),
+      url: source.url,
       customHeaders: mediaHeaders(runtimeParams, detailReferer(videoId, runtimeParams)),
-    }];
+    }));
   } catch (error) {
     console.error("[av01][loadResource] 失败:", error.message || error);
     return [];
+  }
+}
+
+async function loadActresses(params = {}) {
+  try {
+    const runtimeParams = rememberRuntimeParams(params);
+    const geo = await tryGetGeo(runtimeParams);
+    const data = await apiGet("actresses/by-score", runtimeParams, { page: safePage(params.page), limit: 60 });
+    return entitiesFromResponse(data, "actresses").map((item) => toEntityItem(item, "actress", runtimeParams, geo));
+  } catch (error) {
+    console.error("[av01][loadActresses] 失败:", error.message || error);
+    throw error;
+  }
+}
+
+async function loadMakers(params = {}) {
+  try {
+    const runtimeParams = rememberRuntimeParams(params);
+    const geo = await tryGetGeo(runtimeParams);
+    const data = await apiGet("makers/by-score", runtimeParams, { page: safePage(params.page), limit: 60 });
+    return entitiesFromResponse(data, "makers").map((item) => toEntityItem(item, "maker", runtimeParams, geo));
+  } catch (error) {
+    console.error("[av01][loadMakers] 失败:", error.message || error);
+    throw error;
+  }
+}
+
+async function loadTags(params = {}) {
+  try {
+    const runtimeParams = rememberRuntimeParams(params);
+    const data = await apiGet("tags/by-score", runtimeParams, { page: safePage(params.page), limit: 100 });
+    return entitiesFromResponse(data, "tags").map((item) => toEntityItem(item, "tag", runtimeParams, null));
+  } catch (error) {
+    console.error("[av01][loadTags] 失败:", error.message || error);
+    throw error;
   }
 }
 
@@ -238,6 +306,40 @@ function listFromResponse(data) {
   return [];
 }
 
+function entitiesFromResponse(data, key) {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data[key])) return data[key];
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.results)) return data.results;
+  return [];
+}
+
+async function loadEntityDetail(route) {
+  const runtimeParams = getRuntimeParams();
+  const geo = await tryGetGeo(runtimeParams);
+  const data = await apiGet(`videos/${route.type}/${encodePath(route.id)}`, runtimeParams, { page: 1, limit: PAGE_LIMIT });
+  const entity = data[route.type] || data[entityPluralKey(route.type)] || {};
+  const title = translatedName(entity, runtimeParams) || `${entityTitle(route.type)} ${route.id}`;
+  const poster = entityImage(entity, geo);
+  const videos = listFromResponse(data).map((item) => toVideoItem(item, runtimeParams, geo));
+  return {
+    id: encodeEntityLink(route.type, route.id),
+    type: "url",
+    mediaType: "movie",
+    title,
+    posterPath: poster,
+    backdropPath: poster,
+    backdropPaths: poster ? [poster] : [],
+    description: entityDescription(entity, route.type),
+    link: encodeEntityLink(route.type, route.id),
+    playerType: "system",
+    relatedItems: videos,
+    childItems: videos,
+  };
+}
+
 function toDetailItem(video = {}, params = {}, geo, relatedItems = []) {
   const item = toVideoItem(video, params, geo);
   const poster = item.posterPath || item.backdropPath || "";
@@ -269,6 +371,23 @@ function toVideoItem(video = {}, params = {}, geo) {
     duration: numberOrUndefined(video.duration),
     durationText: formatDuration(video.duration),
     link: encodeDetailLink(id),
+    playerType: "system",
+  };
+}
+
+function toEntityItem(entity = {}, type, params = {}, geo) {
+  const id = String(entity.id || entity[`${type}_id`] || "");
+  const title = translatedName(entity, params) || entityTitle(type) + (id ? ` ${id}` : "");
+  const poster = entityImage(entity, geo);
+  return {
+    id: encodeEntityLink(type, id || stableId(title)),
+    type: "url",
+    mediaType: "movie",
+    title,
+    posterPath: poster,
+    backdropPath: poster,
+    description: entityDescription(entity, type),
+    link: encodeEntityLink(type, id),
     playerType: "system",
   };
 }
@@ -361,6 +480,33 @@ function entityImage(item = {}, geo) {
   return `${FILES_HOST}/${String(item.image_r2_key).replace(/^\/+/, "")}?${geoTokenQuery(geo)}`;
 }
 
+function entityDescription(entity = {}, type) {
+  const parts = [entityTitle(type)];
+  const count = entity.video_count || entity.videoCount || entity.videos_count || entity.videosCount || entity.count;
+  if (count) parts.push(`${count} 部影片`);
+  const description = cleanText(entity.description);
+  if (description) parts.push(description);
+  return parts.join("\n");
+}
+
+function entityTitle(type) {
+  if (type === "actress") return "女优";
+  if (type === "maker") return "片商";
+  if (type === "director") return "导演";
+  if (type === "team") return "团队";
+  if (type === "tag") return "分类";
+  return "分类";
+}
+
+function entityPluralKey(type) {
+  if (type === "actress") return "actresses";
+  if (type === "maker") return "makers";
+  if (type === "director") return "directors";
+  if (type === "team") return "teams";
+  if (type === "tag") return "tags";
+  return type + "s";
+}
+
 function signUrl(url, geo) {
   const value = String(url || "").trim();
   if (!value || !/^https?:\/\//i.test(value) || !geo || !geo.token_v2) return value;
@@ -420,7 +566,7 @@ function inferVideoId(params = {}) {
 }
 
 function directPlayableParam(params = {}) {
-  const candidates = [params.videoUrl, params.src, params.file];
+  const candidates = [params.videoUrl, params.url, params.src, params.file];
   for (const candidate of candidates) {
     const url = String(candidate || "").trim();
     if (isPlayableUrl(url)) return url;
@@ -434,20 +580,133 @@ function playlistSource(value) {
   return value.src || value.url || value.videoUrl || value.file || "";
 }
 
+function playlistSources(src) {
+  const value = String(src || "").trim();
+  if (!value) return [];
+  const manifest = decodeDataManifest(value);
+  const parsed = manifest ? manifestSources(manifest) : [];
+  if (parsed.length) return parsed;
+  return isPlayableUrl(value) ? [{ url: value, quality: 0 }] : [];
+}
+
+function decodeDataManifest(src) {
+  const value = String(src || "").trim();
+  if (!/^data:/i.test(value)) return "";
+  const comma = value.indexOf(",");
+  if (comma < 0) return "";
+  const meta = value.slice(0, comma).toLowerCase();
+  const payload = value.slice(comma + 1).replace(/\s+/g, "");
+  if (meta.indexOf(";base64") >= 0) return decodeBase64(payload);
+  try {
+    return decodeURIComponent(payload);
+  } catch (error) {
+    return payload;
+  }
+}
+
+function manifestSources(manifest) {
+  const lines = String(manifest || "").split(/\r?\n/);
+  const out = [];
+  let stream = { quality: 0, bandwidth: 0 };
+  for (const line of lines) {
+    const text = line.trim();
+    if (!text) continue;
+    if (text.indexOf("#EXT-X-STREAM-INF") === 0) {
+      stream = streamInfoFromLine(text);
+      continue;
+    }
+    if (text.charAt(0) === "#") continue;
+    if (/^https?:\/\//i.test(text)) {
+      out.push({ url: text, quality: stream.quality, bandwidth: stream.bandwidth });
+      stream = { quality: 0, bandwidth: 0 };
+    }
+  }
+  return uniqueSourceObjects(out).sort((a, b) =>
+    (b.quality || 0) - (a.quality || 0) ||
+    (b.bandwidth || 0) - (a.bandwidth || 0)
+  );
+}
+
+function streamInfoFromLine(line) {
+  const text = String(line || "");
+  const qualityMatch = text.match(/RESOLUTION=\d+x(\d+)/i);
+  const bandwidthMatch = text.match(/BANDWIDTH=(\d+)/i);
+  const quality = qualityMatch ? Number(qualityMatch[1]) : 0;
+  const bandwidth = bandwidthMatch ? Number(bandwidthMatch[1]) : 0;
+  return {
+    quality: Number.isFinite(quality) ? quality : 0,
+    bandwidth: Number.isFinite(bandwidth) ? bandwidth : 0,
+  };
+}
+
+function uniqueSourceObjects(list) {
+  const seen = {};
+  const out = [];
+  for (const item of list || []) {
+    if (!item || !item.url || seen[item.url]) continue;
+    seen[item.url] = true;
+    out.push(item);
+  }
+  return out;
+}
+
+function decodeBase64(input) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let buffer = 0;
+  let bits = 0;
+  let out = "";
+  for (let index = 0; index < String(input || "").length; index++) {
+    const ch = input.charAt(index);
+    if (ch === "=") break;
+    const value = chars.indexOf(ch);
+    if (value < 0) continue;
+    buffer = (buffer << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out += String.fromCharCode((buffer >> bits) & 255);
+    }
+  }
+  return out;
+}
+
 function isPlayableUrl(url) {
   const value = String(url || "").trim();
   return /^https?:\/\//i.test(value) || /^data:application\/(?:x-mpegurl|vnd\.apple\.mpegurl)/i.test(value);
 }
 
-function playbackName(url, index) {
+function sourceDescription(source = {}, index) {
+  if (index === 0 && source.quality) return `AV01 最高画质 ${source.quality}p`;
+  if (index === 0) return "AV01 最高画质";
+  return source.quality ? `AV01 ${source.quality}p` : "AV01";
+}
+
+function playbackName(url, index, quality, isBest) {
   const lower = String(url || "").toLowerCase();
-  if (lower.indexOf("mpegurl") >= 0 || lower.indexOf(".m3u8") >= 0) return index === 0 ? "HLS 播放" : `HLS ${index + 1}`;
+  if (lower.indexOf("mpegurl") >= 0 || lower.indexOf(".m3u8") >= 0) {
+    if (quality) return `${isBest ? "最高画质 " : ""}HLS ${quality}p`;
+    return index === 0 ? "HLS 播放" : `HLS ${index + 1}`;
+  }
   if (lower.indexOf(".mp4") >= 0) return index === 0 ? "MP4 播放" : `MP4 ${index + 1}`;
   return index === 0 ? "在线播放" : `播放源 ${index + 1}`;
 }
 
 function encodeDetailLink(id) {
   return id ? "detail:" + id : "";
+}
+
+function encodeEntityLink(type, id) {
+  return type && id ? `entity:${type}:${id}` : "";
+}
+
+function decodeEntityLink(link) {
+  const value = String(link || "").trim();
+  if (!value.startsWith("entity:")) return null;
+  const parts = value.split(":");
+  const type = parts[1] || "";
+  const id = parts.slice(2).join(":");
+  if (!id || ["tag", "maker", "director", "team", "actress"].indexOf(type) === -1) return null;
+  return { type, id };
 }
 
 function decodeDetailLink(link) {
