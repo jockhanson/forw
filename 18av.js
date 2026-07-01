@@ -71,6 +71,7 @@ WidgetMetadata = {
 
 const DEFAULT_BASE_URL = "https://18av.mm-cg.com";
 const DEFAULT_LANG = "zh";
+const VIDEO_PLAYER_TYPE = "ijk";
 const RUNTIME_KEY = "18av.runtimeParams";
 
 async function loadList(params = {}) {
@@ -133,7 +134,8 @@ async function loadResource(params = {}) {
       name: source.name || playbackName(source.url, index),
       description: source.source || "18AV",
       url: source.url,
-      customHeaders: mediaHeaders(runtimeParams, href),
+      playerType: VIDEO_PLAYER_TYPE,
+      customHeaders: mediaHeaders(runtimeParams, source.referer || href),
     }));
   } catch (error) {
     console.error("[18av][loadResource] 失败:", error.message || error);
@@ -185,7 +187,7 @@ function parseVideoList(html, baseUrl) {
       previewUrl: preview,
       releaseDate,
       link: encodeDetailLink(href),
-      playerType: "system",
+      playerType: VIDEO_PLAYER_TYPE,
     });
   }
   return items;
@@ -240,8 +242,8 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     previewUrl: poster,
     durationText,
     link: encodeDetailLink(href),
-    playerType: "system",
-    customHeaders: mediaHeaders(params, href),
+    playerType: VIDEO_PLAYER_TYPE,
+    customHeaders: mediaHeaders(params, sources[0] ? (sources[0].referer || href) : href),
     genreItems,
     peoples,
     relatedItems,
@@ -251,7 +253,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
 
 async function collectPlayableSources(html, referer, baseUrl, params = {}) {
   const candidates = [];
-  const direct = extractMediaCandidates(html, baseUrl);
+  const direct = extractMediaCandidates(html, baseUrl, referer);
   for (const item of direct) candidates.push(item);
 
   const playerUrls = extractPlayerFrameUrls(html, baseUrl);
@@ -263,6 +265,7 @@ async function collectPlayableSources(html, referer, baseUrl, params = {}) {
           url: item.url,
           source: playerUrl.name || item.source,
           name: playerUrl.name || item.name,
+          referer: item.referer || playerUrl.url,
           score: numericScore(playerUrl.score) + numericScore(item.score),
         });
       }
@@ -279,7 +282,7 @@ async function collectPlayableSources(html, referer, baseUrl, params = {}) {
 async function resolvePlayerPage(url, params = {}, referer, depth) {
   if (!url || depth > 2) return [];
   const html = await fetchPage(url, params, referer);
-  const candidates = extractMediaCandidates(html, url);
+  const candidates = extractMediaCandidates(html, url, url);
   const iframes = extractIframeUrls(html, url);
   for (const iframeUrl of iframes) {
     if (isPreviewUrl(iframeUrl)) continue;
@@ -575,13 +578,13 @@ function extractBackdropImages(html, baseUrl) {
   return out;
 }
 
-function extractMediaCandidates(html, baseUrl) {
+function extractMediaCandidates(html, baseUrl, referer) {
   const text = normalizeEscapedText(html);
   const candidates = [];
-  collectMediaMatches(candidates, text, /<(?:source|video)\b[^>]*src=(["'])(.*?)\1/gi, baseUrl, "source", 2);
-  collectMediaMatches(candidates, text, /\b(?:file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2);
-  collectMediaMatches(candidates, text, /(https?:\/\/[^"'<>\s\\]+\.(?:m3u8|mp4|webm)(?:\?[^"'<>\s\\]*)?)/gi, baseUrl, "url", 1);
-  collectMediaMatches(candidates, text, /(["'])((?:\/\/|\/)[^"']+\.(?:m3u8|mp4|webm)(?:\?[^"']*)?)\1/gi, baseUrl, "relative", 2);
+  collectMediaMatches(candidates, text, /<(?:source|video)\b[^>]*src=(["'])(.*?)\1/gi, baseUrl, "source", 2, referer);
+  collectMediaMatches(candidates, text, /\b(?:file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2, referer);
+  collectMediaMatches(candidates, text, /(https?:\/\/[^"'<>\s\\]+\.(?:m3u8|mp4|webm)(?:\?[^"'<>\s\\]*)?)/gi, baseUrl, "url", 1, referer);
+  collectMediaMatches(candidates, text, /(["'])((?:\/\/|\/)[^"']+\.(?:m3u8|mp4|webm)(?:\?[^"']*)?)\1/gi, baseUrl, "relative", 2, referer);
   return uniqueCandidates(candidates).filter((candidate) => isPlayableCandidate(candidate.url) && !isPreviewUrl(candidate.url));
 }
 
@@ -602,14 +605,14 @@ function extractIframeUrls(html, baseUrl) {
   return unique(out);
 }
 
-function collectMediaMatches(out, text, re, baseUrl, source, group) {
+function collectMediaMatches(out, text, re, baseUrl, source, group, referer) {
   let match;
-  while ((match = re.exec(text || ""))) collectMediaUrl(out, match[group], baseUrl, source);
+  while ((match = re.exec(text || ""))) collectMediaUrl(out, match[group], baseUrl, source, referer);
 }
 
-function collectMediaUrl(out, rawUrl, baseUrl, source) {
+function collectMediaUrl(out, rawUrl, baseUrl, source, referer) {
   const url = absolutize(rawUrl, baseUrl);
-  if (isPlayableCandidate(url) && !isPreviewUrl(url)) out.push({ url, source });
+  if (isPlayableCandidate(url) && !isPreviewUrl(url)) out.push({ url, source, referer });
 }
 
 function quotedValues(text) {
@@ -885,6 +888,9 @@ function uniqueCandidates(candidates) {
         seen[url].score = score;
         seen[url].source = candidate.source || seen[url].source;
         seen[url].name = candidate.name || seen[url].name;
+        seen[url].referer = candidate.referer || seen[url].referer;
+      } else if (!seen[url].referer && candidate.referer) {
+        seen[url].referer = candidate.referer;
       }
       continue;
     }
@@ -892,6 +898,7 @@ function uniqueCandidates(candidates) {
       url,
       source: candidate.source || "18AV",
       name: candidate.name || "",
+      referer: candidate.referer || "",
       score,
     };
     seen[url] = record;
