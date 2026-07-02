@@ -62,24 +62,24 @@ WidgetMetadata = {
       id: "loadRandomPlaylists",
       title: "随机片单",
       functionName: "loadRandomPlaylists",
-      cacheDuration: 300,
+      cacheDuration: 0,
       params: [
         {
           name: "category",
           title: "分类",
           type: "enumeration",
-          value: "share:CFURVF2E",
+          value: "__randomSlot:0",
           enumOptions: [
-            { title: "随机片单 CFURVF2E", value: "share:CFURVF2E" },
-            { title: "随机片单 JFAZ8PKR", value: "share:JFAZ8PKR" },
-            { title: "随机片单 QP5R77LG", value: "share:QP5R77LG" },
-            { title: "随机片单 CAMSWEQ1", value: "share:CAMSWEQ1" },
-            { title: "随机片单 FD1CH51N", value: "share:FD1CH51N" },
-            { title: "随机片单 W6RLE44S", value: "share:W6RLE44S" },
-            { title: "随机片单 VPVBQKJL", value: "share:VPVBQKJL" },
-            { title: "随机片单 CXD8HRXS", value: "share:CXD8HRXS" },
-            { title: "随机片单 G66V5TC4", value: "share:G66V5TC4" },
-            { title: "随机片单 Z6C9L3GN", value: "share:Z6C9L3GN" },
+            { title: "随机片单 1", value: "__randomSlot:0" },
+            { title: "随机片单 2", value: "__randomSlot:1" },
+            { title: "随机片单 3", value: "__randomSlot:2" },
+            { title: "随机片单 4", value: "__randomSlot:3" },
+            { title: "随机片单 5", value: "__randomSlot:4" },
+            { title: "随机片单 6", value: "__randomSlot:5" },
+            { title: "随机片单 7", value: "__randomSlot:6" },
+            { title: "随机片单 8", value: "__randomSlot:7" },
+            { title: "随机片单 9", value: "__randomSlot:8" },
+            { title: "随机片单 10", value: "__randomSlot:9" },
           ],
         },
         { name: "genreId", title: "片单ID", type: "constant", value: "" },
@@ -173,11 +173,13 @@ async function loadRandomPlaylists(params = {}) {
   try {
     rememberRuntimeParams(params);
     const page = safePage(params.page);
-    const shareCode = playlistCodeFromValue(params.genreId || params.category || params.shareCode);
+    const selection = randomPlaylistSelection(params.genreId || params.category || params.shareCode);
+    const shareCode = selection.shareCode;
     if (shareCode) return await loadSharePlaylistVideos(shareCode, params, page);
     const playlists = await fetchRandomPlaylists(params);
-    const firstShareCode = playlistCodeFromValue(playlists[0] && playlists[0].link);
-    return firstShareCode ? await loadSharePlaylistVideos(firstShareCode, params, page) : playlists;
+    const selected = playlists[selection.slotIndex] || playlists[0];
+    const selectedShareCode = playlistCodeFromValue(selected && selected.link);
+    return selectedShareCode ? await loadSharePlaylistVideos(selectedShareCode, params, page) : [];
   } catch (error) {
     console.error("[netflav][loadRandomPlaylists] 失败:", error.message || error);
     throw error;
@@ -777,6 +779,16 @@ function playlistCodeFromValue(value) {
   if (code) return code;
   const raw = String(value || "").trim();
   return /^[a-z0-9]{6,16}$/i.test(raw) ? raw : "";
+}
+
+function randomPlaylistSelection(value) {
+  const shareCode = playlistCodeFromValue(value);
+  if (shareCode) return { shareCode, slotIndex: 0 };
+  const slot = Number(firstByRe(value, /^__randomSlot:(\d+)$/i));
+  return {
+    shareCode: "",
+    slotIndex: Number.isFinite(slot) && slot >= 0 ? Math.floor(slot) : 0,
+  };
 }
 
 function detailReferer(videoId, params = {}) {
