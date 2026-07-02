@@ -44,7 +44,6 @@ WidgetMetadata = {
             { title: "单体作品", value: "單體作品" },
             { title: "中出", value: "中出" },
             { title: "巨乳", value: "巨乳" },
-            { title: "随机片单", value: "__randomPlaylists" },
             { title: "年度精选 2025", value: "__year:2025" },
             { title: "年度精选 2024", value: "__year:2024" },
             { title: "年度精选 2023", value: "__year:2023" },
@@ -56,6 +55,25 @@ WidgetMetadata = {
         },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadRandomPlaylists",
+      title: "随机片单",
+      functionName: "loadRandomPlaylists",
+      cacheDuration: 300,
+      params: [
+        {
+          name: "category",
+          title: "分类",
+          type: "enumeration",
+          value: "",
+          enumOptions: [
+            { title: "随机片单", value: "" },
+          ],
+        },
+        { name: "genreId", title: "片单ID", type: "constant", value: "" },
         { name: "page", title: "页码", type: "page" },
       ],
     },
@@ -138,6 +156,19 @@ async function loadDetail(link) {
     return toDetailItem(detail, params, sources);
   } catch (error) {
     console.error("[netflav][loadDetail] 失败:", error.message || error);
+    throw error;
+  }
+}
+
+async function loadRandomPlaylists(params = {}) {
+  try {
+    rememberRuntimeParams(params);
+    const page = safePage(params.page);
+    const shareCode = decodeShareLink(params.genreId || params.category || params.shareCode);
+    if (shareCode) return await loadSharePlaylistVideos(shareCode, params, page);
+    return await fetchRandomPlaylists(params);
+  } catch (error) {
+    console.error("[netflav][loadRandomPlaylists] 失败:", error.message || error);
     throw error;
   }
 }
@@ -265,24 +296,22 @@ function toDetailItem(video = {}, params = {}, sources = []) {
 }
 
 async function loadSpecialList(params = {}, category = "", page = 1) {
-  if (category === "__randomPlaylists") return await loadRandomPlaylists(params);
   if (category.startsWith("__year:")) return await loadYearSelection(params, category.slice("__year:".length), page);
   return [];
 }
 
 function isSpecialCategory(category = "") {
-  return category === "__randomPlaylists" || String(category || "").startsWith("__year:");
+  return String(category || "").startsWith("__year:");
 }
 
-async function loadRandomPlaylists(params = {}) {
+async function fetchRandomPlaylists(params = {}) {
   const data = await apiGet("/bookmark/getRandomShareList", params, {});
   return parseResultList(data).map(toPlaylistItem).filter((item) => item.link);
 }
 
 async function loadSharePlaylistDetail(shareCode) {
   const params = getRuntimeParams();
-  const data = await apiPost("/bookmark/getBookmarkWithCode", params, { shareCode, page: 1 });
-  const videos = resultVideoDocs(data).map(toVideoItem);
+  const videos = await loadSharePlaylistVideos(shareCode, params, 1);
   const posters = unique(videos.map((item) => item.posterPath).filter(Boolean));
   return {
     id: encodeShareLink(shareCode),
@@ -294,9 +323,15 @@ async function loadSharePlaylistDetail(shareCode) {
     description: "Netflav 随机片单 " + shareCode,
     link: encodeShareLink(shareCode),
     playerType: VIDEO_PLAYER_TYPE,
+    genreItems: [{ id: encodeShareLink(shareCode), title: "片单影片" }],
     relatedItems: videos,
     childItems: videos,
   };
+}
+
+async function loadSharePlaylistVideos(shareCode, params = {}, page = 1) {
+  const data = await apiPost("/bookmark/getBookmarkWithCode", params, { shareCode, page: safePage(page) });
+  return resultVideoDocs(data).map(toVideoItem);
 }
 
 async function loadYearSelection(params = {}, year = "", page = 1) {
@@ -304,7 +339,8 @@ async function loadYearSelection(params = {}, year = "", page = 1) {
   const baseUrl = normalizeBaseUrl(params.baseUrl || getRuntimeParams().baseUrl || DEFAULT_BASE_URL);
   const res = await Widget.http.get(`${baseUrl}/${safeYear}`, { headers: buildHeaders(params) });
   const html = String((res && res.data) || "");
-  return paginateLocalList(parseYearVideos(html), page, YEAR_SELECTION_PAGE_SIZE).map(toVideoItem);
+  const videos = paginateLocalList(parseYearVideos(html), page, YEAR_SELECTION_PAGE_SIZE);
+  return (await hydrateYearVideos(videos, params)).map(toVideoItem);
 }
 
 function toPlaylistItem(item = {}) {
@@ -322,6 +358,7 @@ function toPlaylistItem(item = {}) {
     description: cleanText(item.description || ("Netflav 随机片单 " + shareCode)),
     link: encodeShareLink(shareCode),
     playerType: VIDEO_PLAYER_TYPE,
+    genreItems: shareCode ? [{ id: encodeShareLink(shareCode), title: "片单影片" }] : [],
   };
 }
 
@@ -350,6 +387,31 @@ function parseYearVideos(html) {
 function paginateLocalList(items = [], page = 1, pageSize = 24) {
   const start = (safePage(page) - 1) * pageSize;
   return (items || []).slice(start, start + pageSize);
+}
+
+async function hydrateYearVideos(videos = [], params = {}) {
+  const hydrated = [];
+  const batchSize = 6;
+  for (let i = 0; i < videos.length; i += batchSize) {
+    const batch = videos.slice(i, i + batchSize);
+    const items = await Promise.all(batch.map((video) => hydrateYearVideo(video, params)));
+    hydrated.push.apply(hydrated, items);
+  }
+  return hydrated;
+}
+
+async function hydrateYearVideo(video = {}, params = {}) {
+  if (!video.videoId) return video;
+  try {
+    const detail = await fetchVideoDetail(video.videoId, params);
+    return Object.assign({}, detail || {}, video, {
+      title: video.title || (detail && detail.title) || video.videoId,
+      sourceDate: video.sourceDate || (detail && (detail.sourceDate || detail.videoDate)) || "",
+    });
+  } catch (error) {
+    console.error("[netflav][hydrateYearVideo] 封面获取失败:", video.videoId, error.message || error);
+    return video;
+  }
 }
 
 async function collectPlayableSources(video = {}, params = {}) {
