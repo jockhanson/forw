@@ -27,6 +27,15 @@ WidgetMetadata = {
       ],
     },
     {
+      name: "loginCookie",
+      title: "登录 Cookie",
+      type: "input",
+      value: "",
+      placeholders: [
+        { title: "JavDB 登录后的完整 Cookie", value: "_jdb_session=...; remember_user_token=..." },
+      ],
+    },
+    {
       name: "userAgent",
       title: "User-Agent",
       type: "input",
@@ -251,6 +260,7 @@ WidgetMetadata = {
 };
 
 const DEFAULT_BASE_URL = "https://javdb.com";
+const DEFAULT_LOGIN_COOKIE = "";
 const RUNTIME_KEY = "javdb.runtimeParams";
 const VIDEO_CODE_RE = /(?:FC2(?:[-_\s]*PPV)?[-_\s]*\d{4,}|[A-Z]{2,10}[-_\s]?\d{2,}[A-Z]?)/i;
 
@@ -345,7 +355,7 @@ async function fetchPage(url, params = {}, referer) {
   } catch (error) {
     const message = String((error && error.message) || error || "");
     if (message.includes("403")) {
-      throw new Error("目标站点返回 403/Cloudflare 验证。请先在浏览器打开站点并通过验证，然后把 Cookie 填入模块参数 Cloudflare Cookie（至少包含 cf_clearance）");
+      throw new Error("目标站点返回 403/Cloudflare 验证或登录限制。请先在浏览器打开站点并通过验证/登录，然后把 Cookie 填入模块参数 Cloudflare Cookie 或 登录 Cookie");
     }
     if (message.includes("404")) throw new Error("HTTP_404:" + url);
     throw error;
@@ -353,7 +363,7 @@ async function fetchPage(url, params = {}, referer) {
   const html = String((res && res.data) || "");
   if (!html) throw new Error("空响应: " + url);
   if (isCloudflareChallenge(html)) {
-    throw new Error("目标站点返回 Cloudflare 验证页。请把浏览器通过验证后的 Cookie 填入模块参数 Cloudflare Cookie（至少包含 cf_clearance）");
+    throw new Error("目标站点返回 Cloudflare 验证页。请把浏览器通过验证后的 Cookie 填入 Cloudflare Cookie；如页面需要登录，也请填入登录 Cookie");
   }
   return html;
 }
@@ -747,6 +757,7 @@ function rememberRuntimeParams(params = {}) {
   const next = {
     baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl),
     cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
+    loginCookie: String(params.loginCookie || saved.loginCookie || "").trim(),
     userAgent: String(params.userAgent || saved.userAgent || "").trim(),
   };
   Widget.storage.set(RUNTIME_KEY, next);
@@ -754,7 +765,7 @@ function rememberRuntimeParams(params = {}) {
 }
 
 function getRuntimeParams() {
-  return Widget.storage.get(RUNTIME_KEY) || { baseUrl: DEFAULT_BASE_URL, cfCookie: "", userAgent: "" };
+  return Widget.storage.get(RUNTIME_KEY) || { baseUrl: DEFAULT_BASE_URL, cfCookie: "", loginCookie: "", userAgent: "" };
 }
 
 function buildHeaders(params = {}, referer) {
@@ -766,15 +777,42 @@ function buildHeaders(params = {}, referer) {
     "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     Referer: referer || normalizeBaseUrl(params.baseUrl) + "/",
   };
-  const cookie = normalizeCookieHeader(params.cfCookie);
+  const cookie = mergeCookieHeaders(
+    normalizeCookieHeader(params.cfCookie, "cf_clearance"),
+    normalizeCookieHeader(params.loginCookie),
+    normalizeCookieHeader(DEFAULT_LOGIN_COOKIE)
+  );
   if (cookie) headers.Cookie = cookie;
   return headers;
 }
 
-function normalizeCookieHeader(value) {
+function normalizeCookieHeader(value, fallbackName) {
   const cookie = String(value || "").trim();
   if (!cookie) return "";
-  return cookie.includes("=") ? cookie : "cf_clearance=" + cookie;
+  if (cookie.includes("=")) return cookie;
+  return fallbackName ? fallbackName + "=" + cookie : "";
+}
+
+function mergeCookieHeaders() {
+  const values = [];
+  const seen = {};
+  for (let i = 0; i < arguments.length; i++) {
+    const cookie = String(arguments[i] || "").trim();
+    if (!cookie) continue;
+    const parts = cookie.split(";");
+    for (const part of parts) {
+      const item = part.trim();
+      if (!item || item.indexOf("=") === -1) continue;
+      const name = item.split("=")[0].trim();
+      if (!name) continue;
+      if (seen[name] !== undefined) values[seen[name]] = item;
+      else {
+        seen[name] = values.length;
+        values.push(item);
+      }
+    }
+  }
+  return values.join("; ");
 }
 
 function encodeDetailLink(href) {
