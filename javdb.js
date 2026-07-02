@@ -169,6 +169,15 @@ WidgetMetadata = {
             { title: "GANA", value: "series/gana" },
           ],
         },
+        {
+          name: "seriesId",
+          title: "影片筛选",
+          type: "input",
+          value: "",
+          placeholders: [
+            { title: "留空显示系列列表；填系列路径显示影片", value: "series/example" },
+          ],
+        },
         { name: "listKind", title: "列表类型", type: "constant", value: "series" },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
@@ -278,10 +287,11 @@ async function loadList(params = {}) {
     const runtimeParams = rememberRuntimeParams(params);
     const page = safePage(params.page);
     const actorRoute = actorRouteParam(params);
-    const route = actorRoute || params.peopleId || params.genreId || params.category || "";
+    const seriesRoute = seriesRouteParam(params);
+    const route = actorRoute || seriesRoute || params.peopleId || params.genreId || params.category || "";
     const isRoutedFromDetail = !!(params.peopleId || params.genreId);
     const html = await fetchPage(pageUrl(runtimeParams.baseUrl, route, page, params.sortType), runtimeParams);
-    if (actorRoute) return parseVideoList(html, runtimeParams.baseUrl);
+    if (actorRoute || seriesRoute) return parseVideoList(html, runtimeParams.baseUrl);
     if (!isRoutedFromDetail && isEntityListKind(params.listKind)) {
       const entities = parseEntityList(html, runtimeParams.baseUrl, params.listKind);
       if (entities.length) return entities;
@@ -725,15 +735,25 @@ function isEntityListKind(kind) {
 
 function actorRouteParam(params = {}) {
   const raw = String(params.actorId || params.actorCategory || params.selectedActor || "").trim();
+  return entityRouteParam(raw, "actor", "actors/");
+}
+
+function seriesRouteParam(params = {}) {
+  const raw = String(params.seriesId || params.seriesCategory || params.selectedSeries || "").trim();
+  return entityRouteParam(raw, "series", "series/");
+}
+
+function entityRouteParam(raw, expectedKind, defaultPrefix) {
   if (!raw) return "";
   const entity = decodeEntityLink(raw);
-  if (entity && entity.kind === "actor") return entity.path;
+  if (entity && entity.kind === expectedKind) return entity.path;
   let route = raw;
-  if (/^https?:\/\//i.test(route)) route = routePathFromUrl(route, params.baseUrl || DEFAULT_BASE_URL);
+  if (/^https?:\/\//i.test(route)) route = routePathFromUrl(route, DEFAULT_BASE_URL);
   route = route.replace(/^detail:/, "").replace(/^\/+|\/+$/g, "");
   if (!route) return "";
-  if (route.indexOf("actors/") === 0 || route.indexOf("actor/") === 0) return route;
-  return "actors/" + route;
+  if (route.indexOf(defaultPrefix) === 0) return route;
+  if (expectedKind === "actor" && route.indexOf("actor/") === 0) return route;
+  return defaultPrefix + route;
 }
 
 function entityPrefixes(kind) {
