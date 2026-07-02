@@ -38,28 +38,181 @@ WidgetMetadata = {
   ],
   modules: [
     {
-      id: "loadList",
-      title: "影片列表",
+      id: "loadCategories",
+      title: "类别",
       functionName: "loadList",
       cacheDuration: 1800,
       requiresWebView: false,
       params: [
         {
           name: "category",
-          title: "分类",
+          title: "类别",
           type: "enumeration",
           value: "",
           enumOptions: [
-            { title: "最新", value: "" },
             { title: "有码", value: "censored" },
             { title: "无码", value: "uncensored" },
-            { title: "FC2", value: "fc2" },
             { title: "欧美", value: "western" },
-            { title: "热门", value: "rankings/movies" },
-            { title: "本周热门", value: "rankings/movies?period=weekly" },
-            { title: "本月热门", value: "rankings/movies?period=monthly" },
+            { title: "FC2", value: "fc2" },
+            { title: "动漫", value: "anime" },
           ],
         },
+        {
+          name: "sortType",
+          title: "排序",
+          type: "enumeration",
+          value: "",
+          enumOptions: [
+            { title: "默认", value: "" },
+            { title: "发布日期", value: "1" },
+            { title: "磁链更新", value: "2" },
+          ],
+        },
+        { name: "listKind", title: "列表类型", type: "constant", value: "video" },
+        { name: "genreId", title: "分类ID", type: "constant", value: "" },
+        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadRankings",
+      title: "排行榜",
+      functionName: "loadList",
+      cacheDuration: 1800,
+      requiresWebView: false,
+      params: [
+        {
+          name: "category",
+          title: "排行榜",
+          type: "enumeration",
+          value: "rankings/movies",
+          enumOptions: [
+            { title: "热门", value: "rankings/movies" },
+            { title: "TOP250", value: "rankings/top250" },
+            { title: "有码", value: "rankings/censored" },
+            { title: "无码", value: "rankings/uncensored" },
+            { title: "欧美", value: "rankings/western" },
+            { title: "FC2", value: "rankings/fc2" },
+            { title: "FANZA(DMM)成人奖", value: "rankings/fanza_adult_award" },
+          ],
+        },
+        { name: "listKind", title: "列表类型", type: "constant", value: "video" },
+        { name: "genreId", title: "分类ID", type: "constant", value: "" },
+        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadActors",
+      title: "演员",
+      functionName: "loadList",
+      cacheDuration: 3600,
+      requiresWebView: false,
+      params: [
+        {
+          name: "category",
+          title: "演员",
+          type: "enumeration",
+          value: "actors",
+          enumOptions: [
+            { title: "推荐", value: "actors" },
+            { title: "有码", value: "actors/censored" },
+            { title: "无码", value: "actors/uncensored" },
+            { title: "欧美", value: "actors/western" },
+          ],
+        },
+        { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
+        { name: "genreId", title: "分类ID", type: "constant", value: "" },
+        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadSeries",
+      title: "系列",
+      functionName: "loadList",
+      cacheDuration: 3600,
+      requiresWebView: false,
+      params: [
+        {
+          name: "category",
+          title: "系列",
+          type: "enumeration",
+          value: "series/censored",
+          enumOptions: [
+            { title: "有码", value: "series/censored" },
+            { title: "无码", value: "series/uncensored" },
+            { title: "欧美", value: "series/western" },
+            { title: "LUXU", value: "series/luxu" },
+            { title: "ARA", value: "series/ara" },
+            { title: "MAAN", value: "series/maan" },
+            { title: "MIUM", value: "series/mium" },
+            { title: "SIRO", value: "series/siro" },
+            { title: "GANA", value: "series/gana" },
+          ],
+        },
+        { name: "listKind", title: "列表类型", type: "constant", value: "series" },
+        { name: "genreId", title: "分类ID", type: "constant", value: "" },
+        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadMakers",
+      title: "片商",
+      functionName: "loadList",
+      cacheDuration: 3600,
+      requiresWebView: false,
+      params: [
+        {
+          name: "category",
+          title: "片商",
+          type: "enumeration",
+          value: "makers/censored",
+          enumOptions: [
+            { title: "有码", value: "makers/censored" },
+            { title: "无码", value: "makers/uncensored" },
+            { title: "麻豆传媒映画", value: "makers/madou" },
+          ],
+        },
+        { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
+        { name: "genreId", title: "分类ID", type: "constant", value: "" },
+        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
+        { name: "page", title: "页码", type: "page" },
+      ],
+    },
+    {
+      id: "loadLatest",
+      title: "最近更新",
+      functionName: "loadList",
+      cacheDuration: 900,
+      requiresWebView: false,
+      params: [
+        {
+          name: "category",
+          title: "类别",
+          type: "enumeration",
+          value: "",
+          enumOptions: [
+            { title: "全部", value: "" },
+            { title: "有码", value: "censored" },
+            { title: "无码", value: "uncensored" },
+            { title: "欧美", value: "western" },
+            { title: "FC2", value: "fc2" },
+            { title: "动漫", value: "anime" },
+          ],
+        },
+        {
+          name: "sortType",
+          title: "排序",
+          type: "enumeration",
+          value: "1",
+          enumOptions: [
+            { title: "发布日期", value: "1" },
+            { title: "磁链更新", value: "2" },
+          ],
+        },
+        { name: "listKind", title: "列表类型", type: "constant", value: "video" },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
         { name: "page", title: "页码", type: "page" },
@@ -82,19 +235,36 @@ WidgetMetadata = {
         ],
       },
       { name: "page", title: "页码", type: "page" },
+      {
+        name: "sortType",
+        title: "排序",
+        type: "enumeration",
+        value: "",
+        enumOptions: [
+          { title: "默认", value: "" },
+          { title: "发布日期", value: "1" },
+          { title: "磁链更新", value: "2" },
+        ],
+      },
     ],
   },
 };
 
 const DEFAULT_BASE_URL = "https://javdb.com";
 const RUNTIME_KEY = "javdb.runtimeParams";
+const VIDEO_CODE_RE = /(?:FC2(?:[-_\s]*PPV)?[-_\s]*\d{4,}|[A-Z]{2,10}[-_\s]?\d{2,}[A-Z]?)/i;
 
 async function loadList(params = {}) {
   try {
     const runtimeParams = rememberRuntimeParams(params);
     const page = safePage(params.page);
     const route = params.peopleId || params.genreId || params.category || "";
-    const html = await fetchPage(pageUrl(runtimeParams.baseUrl, route, page), runtimeParams);
+    const isRoutedFromDetail = !!(params.peopleId || params.genreId);
+    const html = await fetchPage(pageUrl(runtimeParams.baseUrl, route, page, params.sortType), runtimeParams);
+    if (!isRoutedFromDetail && isEntityListKind(params.listKind)) {
+      const entities = parseEntityList(html, runtimeParams.baseUrl, params.listKind);
+      if (entities.length) return entities;
+    }
     return parseVideoList(html, runtimeParams.baseUrl);
   } catch (error) {
     console.error("[javdb][loadList] 失败:", error.message || error);
@@ -111,6 +281,7 @@ async function search(params = {}) {
       q: keyword,
       f: params.searchType || "all",
       page: safePage(params.page),
+      sort_type: normalizeSortType(params.sortType),
     });
     const html = await fetchPage(url, runtimeParams);
     return parseVideoList(html, runtimeParams.baseUrl);
@@ -123,6 +294,8 @@ async function search(params = {}) {
 async function loadDetail(link) {
   try {
     const params = getRuntimeParams();
+    const entityRoute = decodeEntityLink(link);
+    if (entityRoute) return await loadEntityDetail(entityRoute, params);
     const href = normalizeJavDbUrl(decodeDetailLink(link), params.baseUrl);
     if (!href || !isJavDbDetailUrl(href)) return null;
     const baseUrl = getOrigin(href) || params.baseUrl;
@@ -132,6 +305,35 @@ async function loadDetail(link) {
     console.error("[javdb][loadDetail] 失败:", error.message || error);
     throw error;
   }
+}
+
+async function loadEntityDetail(route, params = {}) {
+  const href = pageUrl(params.baseUrl, route.path, 1, "");
+  const html = await fetchPage(href, params);
+  const title = entityDetailTitle(html, route) || route.title || entityTitle(route.kind);
+  const poster = absolutize(
+    firstByRe(html, /<meta\b[^>]*property=(["'])og:image\1[^>]*content=(["'])(.*?)\2/i, 3) ||
+    firstImage(firstBlockByClass(html, "profile")) ||
+    firstImage(firstBlockByClass(html, "actor")) ||
+    firstImage(firstBlockByClass(html, "maker")) ||
+    firstImage(firstBlockByClass(html, "series")),
+    params.baseUrl
+  );
+  const videos = parseVideoList(html, params.baseUrl);
+  return {
+    id: encodeEntityLink(route.kind, route.path, title),
+    type: "url",
+    mediaType: "movie",
+    title,
+    posterPath: poster,
+    backdropPath: poster,
+    backdropPaths: poster ? [poster] : [],
+    description: entityTitle(route.kind) + (videos.length ? "\n" + videos.length + " 部影片" : ""),
+    link: encodeEntityLink(route.kind, route.path, title),
+    playerType: "system",
+    relatedItems: videos,
+    childItems: videos,
+  };
 }
 
 async function fetchPage(url, params = {}, referer) {
@@ -168,13 +370,14 @@ function parseVideoList(html, baseUrl) {
 
     const anchorHtml = match[0];
     const around = rowAround(html, match.index, anchorRe.lastIndex);
-    const title = listTitle(anchorHtml, around);
-    if (!title || isNoiseTitle(title)) continue;
-
     const poster = absolutize(firstImage(anchorHtml) || firstImage(around), baseUrl);
     const metas = unique(extractClassTexts(around, "meta").concat(extractClassTexts(anchorHtml, "meta")));
     const releaseDate = dateOnly(firstMeta(metas, /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/));
-    const code = firstMeta(metas, /[A-Z]{2,10}[-_ ]?\d{2,}/i);
+    const rawTitle = listTitle(anchorHtml, around);
+    const code = normalizeCode(firstMeta(metas, VIDEO_CODE_RE) || extractVideoCode(rawTitle));
+    const title = formatVideoTitle(code, rawTitle);
+    if (!title || isNoiseTitle(title)) continue;
+
     const rating = firstRating(around) || firstRating(anchorHtml);
     const description = listDescription(code, metas);
 
@@ -196,7 +399,7 @@ function parseVideoList(html, baseUrl) {
 }
 
 function parseVideoDetail(html, href, baseUrl) {
-  const title = cleanTitle(
+  const rawTitle = cleanTitle(
     firstByRe(html, /<h[12]\b[^>]*class=(["'])[^"']*\btitle\b[^"']*\1[^>]*>([\s\S]*?)<\/h[12]>/i, 2) ||
     firstByRe(html, /<meta\b[^>]*property=(["'])og:title\1[^>]*content=(["'])(.*?)\2/i, 3) ||
     firstByRe(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)
@@ -208,7 +411,7 @@ function parseVideoDetail(html, href, baseUrl) {
     firstImage(html),
     baseUrl
   );
-  const code = infoValue(html, ["番號", "番号", "識別碼", "识别码", "ID", "Code"]);
+  const code = normalizeCode(infoValue(html, ["番號", "番号", "識別碼", "识别码", "ID", "Code"]) || extractVideoCode(rawTitle));
   const releaseDate = dateOnly(infoValue(html, ["日期", "発売日", "發行日期", "发行日期", "Release Date", "Date"]));
   const durationText = infoValue(html, ["時長", "时长", "片長", "片长", "Duration", "Runtime"]);
   const maker = infoValue(html, ["片商", "製作商", "制作商", "Maker", "Studio"]);
@@ -239,7 +442,7 @@ function parseVideoDetail(html, href, baseUrl) {
     id: detailIdFromUrl(href) || stableId(href),
     type: "url",
     mediaType: "movie",
-    title: title || code || detailIdFromUrl(href) || "JavDB",
+    title: formatVideoTitle(code, rawTitle) || code || detailIdFromUrl(href) || "JavDB",
     posterPath: poster,
     backdropPath: poster,
     backdropPaths,
@@ -328,6 +531,39 @@ function parsePeople(html, baseUrl) {
   return out;
 }
 
+function parseEntityList(html, baseUrl, kind) {
+  const out = [];
+  const seen = {};
+  const prefixes = entityPrefixes(kind);
+  const anchorRe = /<a\b[^>]*href=(["'])([^"']+)["'][^>]*>[\s\S]*?<\/a>/gi;
+  let match;
+  while ((match = anchorRe.exec(String(html || "")))) {
+    const href = normalizeJavDbUrl(match[2], baseUrl);
+    const path = routePathFromUrl(href, baseUrl);
+    if (!pathMatchesPrefix(path, prefixes) || isEntityIndexRoute(path)) continue;
+    if (seen[path]) continue;
+    const anchorHtml = match[0];
+    const around = rowAround(html, match.index, anchorRe.lastIndex);
+    const title = cleanText(attr(anchorHtml, "title") || firstClassText(anchorHtml, "title") || imgAttr(anchorHtml, "alt") || stripTags(anchorHtml));
+    if (!title || isNoiseEntityTitle(title)) continue;
+    seen[path] = true;
+    const poster = absolutize(firstImage(anchorHtml) || firstImage(around), baseUrl);
+    const description = firstClassText(around, "meta") || firstClassText(around, "count") || entityTitle(kind);
+    out.push({
+      id: encodeEntityLink(kind, path, title),
+      type: "url",
+      mediaType: "movie",
+      title,
+      posterPath: poster,
+      backdropPath: poster,
+      description,
+      link: encodeEntityLink(kind, path, title),
+      playerType: "system",
+    });
+  }
+  return out;
+}
+
 function extractPreviewImages(html, baseUrl) {
   const block = classWindow(html, "preview-images", 8000) ||
     classWindow(html, "tile-images", 8000) ||
@@ -380,13 +616,17 @@ function rowAround(html, start, end) {
   return source.slice(from, to);
 }
 
-function pageUrl(baseUrl, route, page) {
+function pageUrl(baseUrl, route, page, sortType) {
   const base = normalizeBaseUrl(baseUrl);
   let path = String(route || "").trim();
-  if (/^https?:\/\//i.test(path)) return appendQuery(path, page > 1 ? { page } : {});
+  const query = {
+    page: page > 1 ? page : "",
+    sort_type: normalizeSortType(sortType),
+  };
+  if (/^https?:\/\//i.test(path)) return appendQuery(path, query);
   path = path.replace(/^\/+/, "").replace(/#.*$/, "");
   const url = path ? base + "/" + path : base + "/";
-  return appendQuery(url, page > 1 ? { page } : {});
+  return appendQuery(url, query);
 }
 
 function appendQuery(url, params = {}) {
@@ -402,6 +642,104 @@ function appendQuery(url, params = {}) {
   }
   if (!pairs.length) return out + hash;
   return out + (out.indexOf("?") >= 0 ? "&" : "?") + pairs.join("&") + hash;
+}
+
+function normalizeSortType(value) {
+  const raw = String(value || "").trim();
+  if (raw === "1" || raw === "release_date" || raw === "date") return "1";
+  if (raw === "2" || raw === "magnet_update" || raw === "magnet") return "2";
+  return "";
+}
+
+function isEntityListKind(kind) {
+  return kind === "actor" || kind === "series" || kind === "maker";
+}
+
+function entityPrefixes(kind) {
+  if (kind === "actor") return ["actors", "actor"];
+  if (kind === "series") return ["series"];
+  if (kind === "maker") return ["makers", "maker", "studios", "companies"];
+  return [];
+}
+
+function entityTitle(kind) {
+  if (kind === "actor") return "演员";
+  if (kind === "series") return "系列";
+  if (kind === "maker") return "片商";
+  return "条目";
+}
+
+function isEntityIndexRoute(path) {
+  const clean = String(path || "").replace(/^\/+|\/+$/g, "").toLowerCase();
+  const routes = [
+    "actors", "actors/censored", "actors/uncensored", "actors/western",
+    "series", "series/censored", "series/uncensored", "series/western",
+    "series/luxu", "series/ara", "series/maan", "series/mium", "series/siro", "series/gana",
+    "makers", "makers/censored", "makers/uncensored", "makers/madou",
+  ];
+  return routes.indexOf(clean) !== -1;
+}
+
+function encodeEntityLink(kind, path) {
+  const safeKind = String(kind || "entity").replace(/[:\s]+/g, "");
+  const safePath = String(path || "").replace(/^\/+|\/+$/g, "");
+  return safePath ? "entity:" + safeKind + ":" + safePath : "";
+}
+
+function decodeEntityLink(link) {
+  const value = String(link || "").trim();
+  if (!value.startsWith("entity:")) return null;
+  const rest = value.slice("entity:".length);
+  const index = rest.indexOf(":");
+  if (index <= 0) return null;
+  const kind = rest.slice(0, index);
+  const path = rest.slice(index + 1).replace(/^\/+|\/+$/g, "");
+  if (!path) return null;
+  return { kind, path };
+}
+
+function entityDetailTitle(html, route) {
+  return cleanTitle(
+    firstByRe(html, /<h[12]\b[^>]*class=(["'])[^"']*\btitle\b[^"']*\1[^>]*>([\s\S]*?)<\/h[12]>/i, 2) ||
+    firstByRe(html, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i) ||
+    firstByRe(html, /<meta\b[^>]*property=(["'])og:title\1[^>]*content=(["'])(.*?)\2/i, 3) ||
+    firstByRe(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i) ||
+    route.path
+  );
+}
+
+function formatVideoTitle(code, title) {
+  const rawTitle = cleanTitle(title);
+  const safeCode = normalizeCode(code || extractVideoCode(rawTitle));
+  if (!safeCode) return rawTitle;
+  const original = stripLeadingVideoCode(rawTitle, safeCode);
+  return original ? safeCode + " " + original : safeCode;
+}
+
+function stripLeadingVideoCode(title, code) {
+  let value = cleanTitle(title);
+  const match = value.match(VIDEO_CODE_RE);
+  if (!match || match.index > 3 || normalizeCode(match[0]) !== code) return value === code ? "" : value;
+  value = (value.slice(0, match.index) + " " + value.slice(match.index + match[0].length))
+    .replace(/^[\s\[【(（]+/, "")
+    .replace(/^[\s\]】)）:：\-_/]+/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return value === code ? "" : value;
+}
+
+function extractVideoCode(value) {
+  const match = cleanText(value).match(VIDEO_CODE_RE);
+  return match ? normalizeCode(match[0]) : "";
+}
+
+function normalizeCode(value) {
+  const match = cleanText(value).match(VIDEO_CODE_RE);
+  if (!match) return "";
+  return match[0]
+    .replace(/[_\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .toUpperCase();
 }
 
 function rememberRuntimeParams(params = {}) {
@@ -657,6 +995,10 @@ function escapeRegExp(value) {
 
 function isNoiseTitle(title) {
   return /^(image|poster|cover|sample|preview)$/i.test(String(title || "").trim());
+}
+
+function isNoiseEntityTitle(title) {
+  return /^(image|poster|cover|sample|preview|有码|无码|歐美|欧美|fc2|推薦|推荐|類別|类别|排行榜|演員|演员|系列|片商)$/i.test(String(title || "").trim());
 }
 
 function isCloudflareChallenge(html) {
