@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.av01",
   title: "AV01",
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.1",
   description: "AV01 列表、搜索、详情与播放源模块",
   author: "Forward",
@@ -220,12 +220,31 @@ async function loadResource(params = {}) {
     const videoId = inferVideoId(params);
     if (!videoId) return [];
     const geo = await getGeo(runtimeParams);
-    const playlist = await apiGet(`videos/${encodePath(videoId)}/playlist`, runtimeParams, {
+    const cdnAccess = await apiGet(`videos/${encodePath(videoId)}/cdn-access`, runtimeParams, {
+      token_v2: geo.token_v2,
       expires: geo.expires,
       ip: geo.ip,
-      token_v2: geo.token_v2,
     });
-    const sources = playlistSources(playlistSource(playlist));
+    const accessToken = cdnAccessToken(cdnAccess);
+    if (!accessToken) throw new Error("CDN access 响应缺少 token");
+
+    let sources = [];
+    try {
+      const master = await apiGetMedia(`videos/${encodePath(videoId)}/manifest/master.m3u8`, runtimeParams, {}, detailReferer(videoId, runtimeParams));
+      sources = playlistSources(master, { videoId, params: runtimeParams, accessToken });
+    } catch (error) {
+      console.log("[av01][loadResource] master manifest 加载失败，尝试 playlist fallback:", error.message || error);
+    }
+
+    if (!sources.length) {
+      const playlist = await apiGet(`videos/${encodePath(videoId)}/playlist`, runtimeParams, {
+        expires: geo.expires,
+        ip: geo.ip,
+        token_v2: geo.token_v2,
+      });
+      sources = playlistSources(playlistSource(playlist), { videoId, params: runtimeParams, accessToken });
+    }
+
     if (!sources.length) return [];
 
     return sources.map((source, index) => ({
@@ -282,6 +301,11 @@ async function apiGet(path, params = {}, query = {}) {
 
 async function apiPost(path, body, params = {}, query = {}) {
   const res = await Widget.http.post(apiUrl(path, params, query), body, { headers: jsonHeaders(params) });
+  return responseData(res);
+}
+
+async function apiGetMedia(path, params = {}, query = {}, referer) {
+  const res = await Widget.http.get(apiUrl(path, params, query), { headers: mediaHeaders(params, referer) });
   return responseData(res);
 }
 
@@ -580,12 +604,14 @@ function playlistSource(value) {
   return value.src || value.url || value.videoUrl || value.file || "";
 }
 
-function playlistSources(src) {
+function playlistSources(src, options = {}) {
   const value = String(src || "").trim();
   if (!value) return [];
   const manifest = decodeDataManifest(value);
-  const parsed = manifest ? manifestSources(manifest) : [];
+  const parsed = manifestSources(manifest || value, options);
   if (parsed.length) return parsed;
+  const proxy = manifestProxyUrl(value, options);
+  if (proxy) return [{ url: proxy, quality: 0 }];
   return isPlayableUrl(value) ? [{ url: value, quality: 0 }] : [];
 }
 
@@ -604,7 +630,7 @@ function decodeDataManifest(src) {
   }
 }
 
-function manifestSources(manifest) {
+function manifestSources(manifest, options = {}) {
   const lines = String(manifest || "").split(/\r?\n/);
   const out = [];
   let stream = { quality: 0, bandwidth: 0 };
@@ -616,8 +642,9 @@ function manifestSources(manifest) {
       continue;
     }
     if (text.charAt(0) === "#") continue;
-    if (/^https?:\/\//i.test(text)) {
-      out.push({ url: text, quality: stream.quality, bandwidth: stream.bandwidth });
+    const url = manifestProxyUrl(text, options) || (/^https?:\/\//i.test(text) ? text : "");
+    if (url) {
+      out.push({ url, quality: stream.quality, bandwidth: stream.bandwidth });
       stream = { quality: 0, bandwidth: 0 };
     }
   }
@@ -648,6 +675,64 @@ function uniqueSourceObjects(list) {
     out.push(item);
   }
   return out;
+}
+
+function cdnAccessToken(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  return String(value.access_token || value.accessToken || value.token || "").trim();
+}
+
+function manifestProxyUrl(source, options = {}) {
+  const videoId = String(options.videoId || "").trim();
+  const accessToken = String(options.accessToken || "").trim();
+  if (!videoId || !accessToken) return "";
+  const variant = manifestVariantPath(source);
+  if (!variant) return "";
+  return appendQuery(apiUrl(`videos/${encodePath(videoId)}/manifest/${variant}`, options.params || {}, {}), {
+    access_token: accessToken,
+  });
+}
+
+function manifestVariantPath(source) {
+  let value = String(source || "").trim();
+  if (!value || value.charAt(0) === "#") return "";
+  value = value.replace(/^\/+/, "");
+  const manifestIndex = value.indexOf("/manifest/");
+  if (manifestIndex >= 0) value = value.slice(manifestIndex + "/manifest/".length);
+  else if (/^https?:\/\//i.test(value)) {
+    const qIndex = value.indexOf("?");
+    const base = qIndex >= 0 ? value.slice(0, qIndex) : value;
+    const query = qIndex >= 0 ? value.slice(qIndex) : "";
+    value = base.slice(base.lastIndexOf("/") + 1) + query;
+  }
+  value = removeQueryParam(value, "access_token");
+  return value.replace(/^\/+/, "");
+}
+
+function removeQueryParam(value, name) {
+  const text = String(value || "");
+  const qIndex = text.indexOf("?");
+  if (qIndex < 0) return text;
+  const path = text.slice(0, qIndex);
+  const query = text.slice(qIndex + 1);
+  const parts = [];
+  const pairs = query.split("&");
+  for (const pair of pairs) {
+    if (!pair) continue;
+    const key = pair.split("=")[0];
+    if (decodeQueryKey(key) === name) continue;
+    parts.push(pair);
+  }
+  return parts.length ? path + "?" + parts.join("&") : path;
+}
+
+function decodeQueryKey(value) {
+  try {
+    return decodeURIComponent(String(value || "").replace(/\+/g, " "));
+  } catch (error) {
+    return String(value || "");
+  }
 }
 
 function decodeBase64(input) {
