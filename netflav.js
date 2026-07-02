@@ -44,6 +44,14 @@ WidgetMetadata = {
             { title: "单体作品", value: "單體作品" },
             { title: "中出", value: "中出" },
             { title: "巨乳", value: "巨乳" },
+            { title: "随机片单", value: "__randomPlaylists" },
+            { title: "年度精选 2025", value: "__year:2025" },
+            { title: "年度精选 2024", value: "__year:2024" },
+            { title: "年度精选 2023", value: "__year:2023" },
+            { title: "年度精选 2022", value: "__year:2022" },
+            { title: "年度精选 2021", value: "__year:2021" },
+            { title: "年度精选 2020", value: "__year:2020" },
+            { title: "年度精选 2019", value: "__year:2019" },
           ],
         },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
@@ -83,12 +91,14 @@ const DEFAULT_BASE_URL = "https://netflav.com";
 const DEFAULT_API_BASE = "https://netflav.com/api98";
 const VIDEO_PLAYER_TYPE = "ijk";
 const DETAIL_ENDPOINTS = ["/video/v3/retrieveVideo/", "/video/v2/retrieveVideo/"];
+const YEAR_SELECTION_PAGE_SIZE = 24;
 
 async function loadList(params = {}) {
   try {
     rememberRuntimeParams(params);
     const page = safePage(params.page);
     const category = String(params.genreId || params.category || "").trim();
+    if (isSpecialCategory(category)) return await loadSpecialList(params, category, page);
     const actor = String(params.peopleId || "").trim();
     const data = await apiGet("/video/v2/getVideo", params, { page, actor, category });
     return parseResultList(data).map(toVideoItem);
@@ -117,6 +127,8 @@ async function search(params = {}) {
 
 async function loadDetail(link) {
   try {
+    const shareCode = decodeShareLink(link);
+    if (shareCode) return await loadSharePlaylistDetail(shareCode);
     const videoId = decodeDetailLink(link);
     if (!videoId) return null;
     const params = getRuntimeParams();
@@ -197,6 +209,17 @@ async function apiGet(path, params = {}, query = {}) {
   return data;
 }
 
+async function apiPost(path, params = {}, body = {}) {
+  const apiBase = normalizeBaseUrl(params.apiBase || getRuntimeParams().apiBase || DEFAULT_API_BASE);
+  const res = await Widget.http.post(apiBase + path, compactParams(body), {
+    headers: buildHeaders(params),
+  });
+  const data = res && res.data;
+  if (!data) throw new Error("空响应");
+  if (data.xpon === "x1") throw new Error("Netflav API 拒绝访问");
+  return data;
+}
+
 function parseResultList(data) {
   const result = parseResultObject(data);
   return (result && result.docs) || [];
@@ -239,6 +262,94 @@ function toDetailItem(video = {}, params = {}, sources = []) {
   item.customHeaders = mediaHeaders(params, firstSource ? (firstSource.referer || detailReferer(video.videoId, params)) : detailReferer(video.videoId, params));
   if (firstSource) item.videoUrl = firstSource.url;
   return item;
+}
+
+async function loadSpecialList(params = {}, category = "", page = 1) {
+  if (category === "__randomPlaylists") return await loadRandomPlaylists(params);
+  if (category.startsWith("__year:")) return await loadYearSelection(params, category.slice("__year:".length), page);
+  return [];
+}
+
+function isSpecialCategory(category = "") {
+  return category === "__randomPlaylists" || String(category || "").startsWith("__year:");
+}
+
+async function loadRandomPlaylists(params = {}) {
+  const data = await apiGet("/bookmark/getRandomShareList", params, {});
+  return parseResultList(data).map(toPlaylistItem).filter((item) => item.link);
+}
+
+async function loadSharePlaylistDetail(shareCode) {
+  const params = getRuntimeParams();
+  const data = await apiPost("/bookmark/getBookmarkWithCode", params, { shareCode, page: 1 });
+  const videos = resultVideoDocs(data).map(toVideoItem);
+  const posters = unique(videos.map((item) => item.posterPath).filter(Boolean));
+  return {
+    id: encodeShareLink(shareCode),
+    type: "url",
+    title: "随机片单 " + shareCode,
+    posterPath: posters[0] || "",
+    backdropPath: posters[0] || "",
+    backdropPaths: posters,
+    description: "Netflav 随机片单 " + shareCode,
+    link: encodeShareLink(shareCode),
+    playerType: VIDEO_PLAYER_TYPE,
+    relatedItems: videos,
+    childItems: videos,
+  };
+}
+
+async function loadYearSelection(params = {}, year = "", page = 1) {
+  const safeYear = String(year || "").match(/^\d{4}$/) ? String(year) : "2025";
+  const baseUrl = normalizeBaseUrl(params.baseUrl || getRuntimeParams().baseUrl || DEFAULT_BASE_URL);
+  const res = await Widget.http.get(`${baseUrl}/${safeYear}`, { headers: buildHeaders(params) });
+  const html = String((res && res.data) || "");
+  return paginateLocalList(parseYearVideos(html), page, YEAR_SELECTION_PAGE_SIZE).map(toVideoItem);
+}
+
+function toPlaylistItem(item = {}) {
+  const shareCode = String(item.shareCode || item.code || item.id || "").trim();
+  const posters = unique((Array.isArray(item.srcs) ? item.srcs : [])
+    .map(cleanImage)
+    .filter(Boolean));
+  return {
+    id: encodeShareLink(shareCode) || stableId(JSON.stringify(item)),
+    type: "url",
+    title: cleanText(item.title || item.name || ("随机片单 " + shareCode)),
+    posterPath: posters[0] || "",
+    backdropPath: posters[0] || "",
+    backdropPaths: posters,
+    description: cleanText(item.description || ("Netflav 随机片单 " + shareCode)),
+    link: encodeShareLink(shareCode),
+    playerType: VIDEO_PLAYER_TYPE,
+  };
+}
+
+function resultVideoDocs(data) {
+  return parseResultList(data).map((item) => item && (item.video || item)).filter(Boolean);
+}
+
+function parseYearVideos(html) {
+  const items = [];
+  const seen = {};
+  const re = /href=["']\/video\?id=([^"'&#]+)[^"']*["'][\s\S]*?<div class=["']grid_0_title["']>([\s\S]*?)<\/div>\s*<div class=["']grid_0_date["']>([\s\S]*?)<\/div>/gi;
+  let match;
+  while ((match = re.exec(String(html || "")))) {
+    const videoId = decodeURIComponent(match[1] || "");
+    if (!videoId || seen[videoId]) continue;
+    seen[videoId] = true;
+    items.push({
+      videoId,
+      title: cleanHtmlText(match[2]),
+      sourceDate: cleanHtmlText(match[3]),
+    });
+  }
+  return items;
+}
+
+function paginateLocalList(items = [], page = 1, pageSize = 24) {
+  const start = (safePage(page) - 1) * pageSize;
+  return (items || []).slice(start, start + pageSize);
 }
 
 async function collectPlayableSources(video = {}, params = {}) {
@@ -569,12 +680,23 @@ function encodeDetailLink(videoId) {
   return videoId ? "detail:" + videoId : "";
 }
 
+function encodeShareLink(shareCode) {
+  return shareCode ? "share:" + shareCode : "";
+}
+
 function decodeDetailLink(link) {
   const value = String(link || "").trim();
   if (!value) return "";
   if (value.startsWith("detail:")) return value.slice("detail:".length);
   const match = value.match(/[?&]id=([^&#]+)/);
   return match ? decodeURIComponent(match[1]) : value;
+}
+
+function decodeShareLink(link) {
+  const value = String(link || "").trim();
+  if (value.startsWith("share:")) return value.slice("share:".length);
+  const match = value.match(/[?&]c=([^&#]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
 }
 
 function detailReferer(videoId, params = {}) {
@@ -631,6 +753,17 @@ function safePage(page) {
 
 function cleanText(text) {
   return String(text || "").replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function cleanHtmlText(html) {
+  return cleanText(String(html || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(?:amp|#38);/gi, "&")
+    .replace(/&(?:lt|#60);/gi, "<")
+    .replace(/&(?:gt|#62);/gi, ">")
+    .replace(/&(?:quot|#34);/gi, "\"")
+    .replace(/&(?:apos|#39);/gi, "'")
+    .replace(/&nbsp;|&#160;/gi, " "));
 }
 
 function cleanImage(url) {
