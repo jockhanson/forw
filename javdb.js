@@ -156,17 +156,17 @@ WidgetMetadata = {
           name: "category",
           title: "系列",
           type: "enumeration",
-          value: "series/censored",
+          value: "series",
           enumOptions: [
-            { title: "有码", value: "series/censored" },
+            { title: "有码系列", value: "series" },
             { title: "无码", value: "series/uncensored" },
             { title: "欧美", value: "series/western" },
-            { title: "LUXU", value: "series/luxu" },
-            { title: "ARA", value: "series/ara" },
-            { title: "MAAN", value: "series/maan" },
-            { title: "MIUM", value: "series/mium" },
-            { title: "SIRO", value: "series/siro" },
-            { title: "GANA", value: "series/gana" },
+            { title: "LUXU", value: "video_codes/LUXU" },
+            { title: "ARA", value: "video_codes/ARA" },
+            { title: "MAAN", value: "video_codes/MAAN" },
+            { title: "MIUM", value: "video_codes/MIUM" },
+            { title: "SIRO", value: "video_codes/SIRO" },
+            { title: "GANA", value: "video_codes/GANA" },
           ],
         },
         {
@@ -195,11 +195,13 @@ WidgetMetadata = {
           name: "category",
           title: "片商",
           type: "enumeration",
-          value: "makers/censored",
+          value: "makers",
           enumOptions: [
-            { title: "有码", value: "makers/censored" },
+            { title: "片商有码", value: "makers" },
+            { title: "S1 NO.1 STYLE", value: "makers/7R" },
             { title: "无码", value: "makers/uncensored" },
-            { title: "麻豆传媒映画", value: "makers/madou" },
+            { title: "Heydouga", value: "makers/xZyO" },
+            { title: "麻豆传媒", value: "makers/N73g?f=download" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
@@ -291,7 +293,7 @@ async function loadList(params = {}) {
     const route = actorRoute || seriesRoute || params.peopleId || params.genreId || params.category || "";
     const isRoutedFromDetail = !!(params.peopleId || params.genreId);
     const html = await fetchPage(pageUrl(runtimeParams.baseUrl, route, page, params.sortType), runtimeParams);
-    if (actorRoute || seriesRoute) return parseVideoList(html, runtimeParams.baseUrl);
+    if (actorRoute || seriesRoute || isDirectVideoCategory(params.listKind, route)) return parseVideoList(html, runtimeParams.baseUrl);
     if (!isRoutedFromDetail && isEntityListKind(params.listKind)) {
       const entities = parseEntityList(html, runtimeParams.baseUrl, params.listKind);
       if (entities.length) return entities;
@@ -733,6 +735,14 @@ function isEntityListKind(kind) {
   return kind === "actor" || kind === "series" || kind === "maker";
 }
 
+function isDirectVideoCategory(kind, route) {
+  const path = cleanRoutePath(route);
+  if (!path) return false;
+  if (kind === "series") return path.indexOf("video_codes/") === 0 || (path.indexOf("series/") === 0 && !isEntityIndexRoute(path));
+  if (kind === "maker") return (path.indexOf("makers/") === 0 || path.indexOf("maker/") === 0) && !isEntityIndexRoute(path);
+  return false;
+}
+
 function actorRouteParam(params = {}) {
   const raw = String(params.actorId || params.actorCategory || params.selectedActor || "").trim();
   return entityRouteParam(raw, "actor", "actors/");
@@ -749,7 +759,7 @@ function entityRouteParam(raw, expectedKind, defaultPrefix) {
   if (entity && entity.kind === expectedKind) return entity.path;
   let route = raw;
   if (/^https?:\/\//i.test(route)) route = routePathFromUrl(route, DEFAULT_BASE_URL);
-  route = route.replace(/^detail:/, "").replace(/^\/+|\/+$/g, "");
+  route = cleanRoutePath(route.replace(/^detail:/, ""));
   if (!route) return "";
   if (route.indexOf(defaultPrefix) === 0) return route;
   if (expectedKind === "actor" && route.indexOf("actor/") === 0) return route;
@@ -771,14 +781,17 @@ function entityTitle(kind) {
 }
 
 function isEntityIndexRoute(path) {
-  const clean = String(path || "").replace(/^\/+|\/+$/g, "").toLowerCase();
+  const clean = cleanRoutePath(path).toLowerCase();
   const routes = [
     "actors", "actors/censored", "actors/uncensored", "actors/western",
     "series", "series/censored", "series/uncensored", "series/western",
-    "series/luxu", "series/ara", "series/maan", "series/mium", "series/siro", "series/gana",
-    "makers", "makers/censored", "makers/uncensored", "makers/madou",
+    "makers", "makers/censored", "makers/uncensored",
   ];
   return routes.indexOf(clean) !== -1;
+}
+
+function cleanRoutePath(value) {
+  return String(value || "").split("#")[0].replace(/^\/+|\/+$/g, "");
 }
 
 function encodeEntityLink(kind, path) {
