@@ -118,7 +118,7 @@ WidgetMetadata = {
       cacheDuration: 3600,
       requiresWebView: false,
       params: [
-        { name: "category", title: "演员", type: "constant", value: "actors" },
+        { name: "category", title: "演员", type: "constant", value: "actors/eKbnd" },
         {
           name: "actorId",
           title: "分类筛选",
