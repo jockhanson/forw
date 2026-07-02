@@ -125,7 +125,7 @@ WidgetMetadata = {
           type: "input",
           value: "",
           placeholders: [
-            { title: "留空显示推荐演员列表；填列表里的演员路径显示作品", value: "actors/example" },
+            { title: "分类", value: "actors" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
