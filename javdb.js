@@ -125,7 +125,7 @@ WidgetMetadata = {
           type: "input",
           value: "",
           placeholders: [
-            { title: "分类", value: "actors" },
+            { title: "分类", value: "actors/eKbnd" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
