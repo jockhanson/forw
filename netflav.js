@@ -68,9 +68,18 @@ WidgetMetadata = {
           name: "category",
           title: "分类",
           type: "enumeration",
-          value: "",
+          value: "share:CFURVF2E",
           enumOptions: [
-            { title: "随机片单", value: "" },
+            { title: "随机片单 CFURVF2E", value: "share:CFURVF2E" },
+            { title: "随机片单 JFAZ8PKR", value: "share:JFAZ8PKR" },
+            { title: "随机片单 QP5R77LG", value: "share:QP5R77LG" },
+            { title: "随机片单 CAMSWEQ1", value: "share:CAMSWEQ1" },
+            { title: "随机片单 FD1CH51N", value: "share:FD1CH51N" },
+            { title: "随机片单 W6RLE44S", value: "share:W6RLE44S" },
+            { title: "随机片单 VPVBQKJL", value: "share:VPVBQKJL" },
+            { title: "随机片单 CXD8HRXS", value: "share:CXD8HRXS" },
+            { title: "随机片单 G66V5TC4", value: "share:G66V5TC4" },
+            { title: "随机片单 Z6C9L3GN", value: "share:Z6C9L3GN" },
           ],
         },
         { name: "genreId", title: "片单ID", type: "constant", value: "" },
@@ -164,9 +173,11 @@ async function loadRandomPlaylists(params = {}) {
   try {
     rememberRuntimeParams(params);
     const page = safePage(params.page);
-    const shareCode = decodeShareLink(params.genreId || params.category || params.shareCode);
+    const shareCode = playlistCodeFromValue(params.genreId || params.category || params.shareCode);
     if (shareCode) return await loadSharePlaylistVideos(shareCode, params, page);
-    return await fetchRandomPlaylists(params);
+    const playlists = await fetchRandomPlaylists(params);
+    const firstShareCode = playlistCodeFromValue(playlists[0] && playlists[0].link);
+    return firstShareCode ? await loadSharePlaylistVideos(firstShareCode, params, page) : playlists;
   } catch (error) {
     console.error("[netflav][loadRandomPlaylists] 失败:", error.message || error);
     throw error;
@@ -759,6 +770,13 @@ function decodeShareLink(link) {
   if (value.startsWith("share:")) return value.slice("share:".length);
   const match = value.match(/[?&]c=([^&#]+)/);
   return match ? decodeURIComponent(match[1]) : "";
+}
+
+function playlistCodeFromValue(value) {
+  const code = decodeShareLink(value);
+  if (code) return code;
+  const raw = String(value || "").trim();
+  return /^[a-z0-9]{6,16}$/i.test(raw) ? raw : "";
 }
 
 function detailReferer(videoId, params = {}) {
