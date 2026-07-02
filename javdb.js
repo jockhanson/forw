@@ -369,26 +369,36 @@ async function fetchPage(url, params = {}, referer) {
 }
 
 function parseVideoList(html, baseUrl) {
-  const items = [];
-  const seen = {};
+  const buckets = [];
+  const bucketByHref = {};
   const anchorRe = /<a\b[^>]*href=(["'])([^"']*\/v\/[^"']+)["'][^>]*>[\s\S]*?<\/a>/gi;
   let match;
   while ((match = anchorRe.exec(String(html || "")))) {
     const href = normalizeJavDbUrl(match[2], baseUrl);
-    if (!href || seen[href]) continue;
-    seen[href] = true;
-
+    if (!href) continue;
     const anchorHtml = match[0];
     const around = rowAround(html, match.index, anchorRe.lastIndex);
-    const poster = absolutize(firstImage(anchorHtml) || firstImage(around), baseUrl);
-    const metas = unique(extractClassTexts(around, "meta").concat(extractClassTexts(anchorHtml, "meta")));
+    if (!bucketByHref[href]) {
+      bucketByHref[href] = { href, parts: [], poster: "" };
+      buckets.push(bucketByHref[href]);
+    }
+    bucketByHref[href].parts.push(anchorHtml, around);
+    if (!bucketByHref[href].poster) bucketByHref[href].poster = absolutize(firstImage(anchorHtml) || firstImage(around), baseUrl);
+  }
+
+  const items = [];
+  for (const bucket of buckets) {
+    const href = bucket.href;
+    const combinedHtml = bucket.parts.join("\n");
+    const poster = bucket.poster || absolutize(firstImage(combinedHtml), baseUrl);
+    const metas = unique(extractClassTexts(combinedHtml, "meta"));
     const releaseDate = dateOnly(firstMeta(metas, /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/));
-    const rawTitle = listTitle(anchorHtml, around);
-    const code = normalizeCode(firstMeta(metas, VIDEO_CODE_RE) || extractVideoCode(rawTitle));
+    const rawTitle = listTitle(combinedHtml, combinedHtml);
+    const code = normalizeCode(firstMeta(metas, VIDEO_CODE_RE) || extractVideoCode(combinedHtml) || extractVideoCode(rawTitle));
     const title = formatVideoTitle(code, rawTitle);
     if (!title || isNoiseTitle(title)) continue;
 
-    const rating = firstRating(around) || firstRating(anchorHtml);
+    const rating = firstRating(combinedHtml);
     const description = listDescription(code, metas);
 
     items.push({
@@ -470,14 +480,50 @@ function parseVideoDetail(html, href, baseUrl) {
 }
 
 function listTitle(anchorHtml, around) {
-  return cleanTitle(
-    attr(anchorHtml, "title") ||
-    firstClassText(anchorHtml, "video-title") ||
-    firstClassText(around, "video-title") ||
-    imgAttr(anchorHtml, "alt") ||
-    imgAttr(around, "alt") ||
-    stripTags(anchorHtml)
-  );
+  const candidates = [];
+  pushTitleCandidate(candidates, attr(anchorHtml, "title"));
+  pushTitleCandidate(candidates, firstClassText(anchorHtml, "video-title"));
+  pushTitleCandidate(candidates, firstClassText(around, "video-title"));
+  pushTitleCandidate(candidates, firstClassText(around, "movie-title"));
+  pushTitleCandidate(candidates, firstClassText(around, "uid"));
+  pushTitleCandidate(candidates, imgAttr(anchorHtml, "alt"));
+  pushTitleCandidate(candidates, imgAttr(around, "alt"));
+
+  const anchorRe = /<a\b[^>]*href=(["'])([^"']*\/v\/[^"']+)["'][^>]*>[\s\S]*?<\/a>/gi;
+  let match;
+  while ((match = anchorRe.exec(String(around || "")))) pushTitleCandidate(candidates, stripTags(stripListNoiseBlocks(match[0])));
+
+  if (!candidates.length) pushTitleCandidate(candidates, stripTags(stripListNoiseBlocks(anchorHtml)));
+  return bestTitleCandidate(candidates);
+}
+
+function stripListNoiseBlocks(html) {
+  return String(html || "")
+    .replace(/<[^>]*class=(["'])[^"']*\b(?:meta|score|rating|cover)\b[^"']*\1[^>]*>[\s\S]*?<\/[^>]+>/gi, " ")
+    .replace(/<img\b[^>]*>/gi, " ");
+}
+
+function pushTitleCandidate(out, value) {
+  const title = cleanTitle(value);
+  if (!title || isNoiseTitle(title)) return;
+  if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(title)) return;
+  if (out.indexOf(title) === -1) out.push(title);
+}
+
+function bestTitleCandidate(candidates) {
+  let best = "";
+  let bestScore = -1;
+  for (const title of candidates || []) {
+    const code = extractVideoCode(title);
+    const original = code ? stripLeadingVideoCode(title, code) : title;
+    const hasOriginal = !!original && original !== code;
+    const score = (code ? 500 : 0) + (hasOriginal ? 1000 : 0) + Math.min(title.length, 240);
+    if (score > bestScore) {
+      bestScore = score;
+      best = title;
+    }
+  }
+  return best;
 }
 
 function listDescription(code, metas) {
