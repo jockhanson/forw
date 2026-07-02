@@ -112,40 +112,6 @@ WidgetMetadata = {
       ],
     },
     {
-      id: "loadActors",
-      title: "演员",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        {
-          name: "category",
-          title: "演员",
-          type: "enumeration",
-          value: "actors",
-          enumOptions: [
-            { title: "推荐", value: "actors" },
-            { title: "有码", value: "actors/censored" },
-            { title: "无码", value: "actors/uncensored" },
-            { title: "欧美", value: "actors/western" },
-          ],
-        },
-        {
-          name: "actorId",
-          title: "演员分类",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示演员列表；填演员路径显示作品", value: "actors/example" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
       id: "loadActorRecommended",
       title: "推荐演员",
       functionName: "loadList",
@@ -155,11 +121,11 @@ WidgetMetadata = {
         { name: "category", title: "演员", type: "constant", value: "actors" },
         {
           name: "actorId",
-          title: "演员筛选",
+          title: "分类筛选",
           type: "input",
           value: "",
           placeholders: [
-            { title: "留空显示演员列表；填演员路径显示作品", value: "actors/example" },
+            { title: "留空显示推荐演员列表；填列表里的演员路径显示作品", value: "actors/example" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -178,11 +144,11 @@ WidgetMetadata = {
         { name: "category", title: "演员", type: "constant", value: "actors/uncensored" },
         {
           name: "actorId",
-          title: "演员筛选",
+          title: "分类筛选",
           type: "input",
           value: "",
           placeholders: [
-            { title: "留空显示演员列表；填演员路径显示作品", value: "actors/example" },
+            { title: "留空显示无码演员列表；填列表里的演员路径显示作品", value: "actors/example" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -201,11 +167,11 @@ WidgetMetadata = {
         { name: "category", title: "演员", type: "constant", value: "actors/censored" },
         {
           name: "actorId",
-          title: "演员筛选",
+          title: "分类筛选",
           type: "input",
           value: "",
           placeholders: [
-            { title: "留空显示演员列表；填演员路径显示作品", value: "actors/example" },
+            { title: "留空显示有码演员列表；填列表里的演员路径显示作品", value: "actors/example" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -224,11 +190,11 @@ WidgetMetadata = {
         { name: "category", title: "演员", type: "constant", value: "actors/western" },
         {
           name: "actorId",
-          title: "演员筛选",
+          title: "分类筛选",
           type: "input",
           value: "",
           placeholders: [
-            { title: "留空显示演员列表；填演员路径显示作品", value: "actors/example" },
+            { title: "留空显示欧美演员列表；填列表里的演员路径显示作品", value: "actors/example" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -263,7 +229,7 @@ WidgetMetadata = {
         },
         {
           name: "seriesId",
-          title: "影片筛选",
+          title: "分类筛选",
           type: "input",
           value: "",
           placeholders: [
@@ -277,32 +243,6 @@ WidgetMetadata = {
       ],
     },
     {
-      id: "loadMakers",
-      title: "片商",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        {
-          name: "category",
-          title: "片商",
-          type: "enumeration",
-          value: "makers",
-          enumOptions: [
-            { title: "片商有码", value: "makers" },
-            { title: "S1 NO.1 STYLE", value: "makers/7R" },
-            { title: "无码", value: "makers/uncensored" },
-            { title: "Heydouga", value: "makers/xZyO" },
-            { title: "麻豆传媒", value: "makers/N73g?f=download" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
       id: "loadMakerUncensored",
       title: "无码片商",
       functionName: "loadList",
@@ -310,6 +250,16 @@ WidgetMetadata = {
       requiresWebView: false,
       params: [
         { name: "category", title: "片商", type: "constant", value: "makers/uncensored" },
+        {
+          name: "makerId",
+          title: "分类筛选",
+          type: "input",
+          value: "",
+          placeholders: [
+            { title: "留空显示无码片商列表；填列表里的片商路径显示作品", value: "makers/example" },
+            { title: "Heydouga", value: "makers/xZyO" },
+          ],
+        },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
@@ -324,6 +274,16 @@ WidgetMetadata = {
       requiresWebView: false,
       params: [
         { name: "category", title: "片商", type: "constant", value: "makers" },
+        {
+          name: "makerId",
+          title: "分类筛选",
+          type: "input",
+          value: "",
+          placeholders: [
+            { title: "留空显示有码片商列表；填列表里的片商路径显示作品", value: "makers/example" },
+            { title: "S1 NO.1 STYLE", value: "makers/7R" },
+          ],
+        },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
@@ -338,6 +298,15 @@ WidgetMetadata = {
       requiresWebView: false,
       params: [
         { name: "category", title: "片商", type: "constant", value: "makers/N73g?f=download" },
+        {
+          name: "makerId",
+          title: "分类筛选",
+          type: "input",
+          value: "",
+          placeholders: [
+            { title: "留空显示麻豆传媒作品；填片商路径显示对应作品", value: "makers/N73g?f=download" },
+          ],
+        },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
         { name: "genreId", title: "分类ID", type: "constant", value: "" },
         { name: "peopleId", title: "演员ID", type: "constant", value: "" },
@@ -422,12 +391,13 @@ async function loadList(params = {}) {
   try {
     const runtimeParams = rememberRuntimeParams(params);
     const page = safePage(params.page);
-    const actorRoute = actorRouteParam(params);
-    const seriesRoute = seriesRouteParam(params);
-    const route = actorRoute || seriesRoute || params.peopleId || params.genreId || params.category || "";
+    const actorRoute = params.listKind === "actor" ? actorRouteParam(params) : "";
+    const seriesRoute = params.listKind === "series" ? seriesRouteParam(params) : "";
+    const makerRoute = params.listKind === "maker" ? makerRouteParam(params) : "";
+    const route = actorRoute || seriesRoute || makerRoute || params.peopleId || params.genreId || params.category || "";
     const isRoutedFromDetail = !!(params.peopleId || params.genreId);
     const html = await fetchPage(pageUrl(runtimeParams.baseUrl, route, page, params.sortType), runtimeParams);
-    if (actorRoute || seriesRoute || isDirectVideoCategory(params.listKind, route)) return parseVideoList(html, runtimeParams.baseUrl);
+    if (actorRoute || seriesRoute || makerRoute || isDirectVideoCategory(params.listKind, route)) return parseVideoList(html, runtimeParams.baseUrl);
     if (!isRoutedFromDetail && isEntityListKind(params.listKind)) {
       const entities = parseEntityList(html, runtimeParams.baseUrl, params.listKind);
       if (entities.length) return entities;
@@ -887,6 +857,11 @@ function seriesRouteParam(params = {}) {
   return entityRouteParam(raw, "series", "series/");
 }
 
+function makerRouteParam(params = {}) {
+  const raw = String(params.makerId || params.makerCategory || params.selectedMaker || "").trim();
+  return entityRouteParam(raw, "maker", "makers/");
+}
+
 function entityRouteParam(raw, expectedKind, defaultPrefix) {
   if (!raw) return "";
   const entity = decodeEntityLink(raw);
@@ -897,6 +872,7 @@ function entityRouteParam(raw, expectedKind, defaultPrefix) {
   if (!route) return "";
   if (route.indexOf(defaultPrefix) === 0) return route;
   if (expectedKind === "actor" && route.indexOf("actor/") === 0) return route;
+  if (expectedKind === "maker" && route.indexOf("maker/") === 0) return route;
   return defaultPrefix + route;
 }
 
