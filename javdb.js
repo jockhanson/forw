@@ -8,385 +8,102 @@ WidgetMetadata = {
   site: "https://javdb.com/",
   detailCacheDuration: 60,
   globalParams: [
-    {
-      name: "baseUrl",
-      title: "站点地址",
-      type: "input",
-      value: "https://javdb.com",
-      placeholders: [
-        { title: "JavDB", value: "https://javdb.com" },
-        { title: "JavDB", value: "https://javdb570.com" },
-      ],
-    },
-    {
-      name: "cfCookie",
-      title: "Cloudflare Cookie",
-      type: "input",
-      value: "",
-      placeholders: [
-        { title: "浏览器通过验证后的 Cookie", value: "cf_clearance=..." },
-      ],
-    },
-    {
-      name: "loginCookie",
-      title: "登录 Cookie",
-      type: "input",
-      value: "",
-      placeholders: [
-        { title: "JavDB 登录后的完整 Cookie", value: "_jdb_session=...; remember_user_token=..." },
-      ],
-    },
-    {
-      name: "userAgent",
-      title: "User-Agent",
-      type: "input",
-      value: "",
-      placeholders: [
-        { title: "留空使用默认；如 Cookie 无效请填获取 Cookie 时浏览器的 UA", value: "" },
-      ],
-    },
+    inputParam("baseUrl", "站点地址", "https://javdb.com", [["JavDB", "https://javdb.com"], ["JavDB", "https://javdb570.com"]]),
+    inputParam("cfCookie", "Cloudflare Cookie", "", [["浏览器通过验证后的 Cookie", "cf_clearance=..."]]),
+    inputParam("loginCookie", "登录 Cookie", "", [["JavDB 登录后的完整 Cookie", "_jdb_session=...; remember_user_token=..."]]),
+    inputParam("userAgent", "User-Agent", "", [["留空使用默认；如 Cookie 无效请填获取 Cookie 时浏览器的 UA", ""]]),
   ],
   modules: [
-    {
-      id: "loadCategories",
-      title: "类别",
-      functionName: "loadList",
-      cacheDuration: 1800,
-      requiresWebView: false,
-      params: [
-        {
-          name: "category",
-          title: "类别",
-          type: "enumeration",
-          value: "",
-          enumOptions: [
-            { title: "有码", value: "censored" },
-            { title: "无码", value: "uncensored" },
-            { title: "欧美", value: "western" },
-            { title: "FC2", value: "fc2" },
-            { title: "动漫", value: "anime" },
-          ],
-        },
-        {
-          name: "sortType",
-          title: "排序",
-          type: "enumeration",
-          value: "",
-          enumOptions: [
-            { title: "默认", value: "" },
-            { title: "发布日期", value: "1" },
-            { title: "磁链更新", value: "2" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "video" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadRankings",
-      title: "排行榜",
-      functionName: "loadList",
-      cacheDuration: 1800,
-      requiresWebView: false,
-      params: [
-        {
-          name: "category",
-          title: "排行榜",
-          type: "enumeration",
-          value: "rankings/movies",
-          enumOptions: [
-            { title: "热门", value: "rankings/movies" },
-            { title: "TOP250", value: "rankings/top250" },
-            { title: "有码", value: "rankings/censored" },
-            { title: "无码", value: "rankings/uncensored" },
-            { title: "欧美", value: "rankings/western" },
-            { title: "FC2", value: "rankings/fc2" },x s
-            { title: "FANZA成人奖", value: "rankings/fanza_adult_award" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "video" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadActorRecommended",
-      title: "推荐演员",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "演员", type: "constant", value: "actors" },
-        {
-          name: "actorId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示推荐演员列表；填列表里的演员路径显示作品", value: "actors/example" },
-            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadActorUncensored",
-      title: "无码演员",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "演员", type: "constant", value: "actors/uncensored" },
-        {
-          name: "actorId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示无码演员列表；填列表里的演员路径显示作品", value: "actors/example" },
-            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadActorCensored",
-      title: "有码演员",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "演员", type: "constant", value: "actors/censored" },
-        {
-          name: "actorId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示有码演员列表；填列表里的演员路径显示作品", value: "actors/example" },
-            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadActorWestern",
-      title: "欧美演员",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "演员", type: "constant", value: "actors/western" },
-        {
-          name: "actorId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示欧美演员列表；填列表里的演员路径显示作品", value: "actors/example" },
-            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadSeries",
-      title: "系列",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        {
-          name: "category",
-          title: "系列",
-          type: "enumeration",
-          value: "series",
-          enumOptions: [
-            { title: "有码系列", value: "series" },
-            { title: "无码", value: "series/uncensored" },
-            { title: "欧美", value: "series/western" },
-            { title: "LUXU", value: "video_codes/LUXU" },
-            { title: "ARA", value: "video_codes/ARA" },
-            { title: "MAAN", value: "video_codes/MAAN" },
-            { title: "MIUM", value: "video_codes/MIUM" },
-            { title: "SIRO", value: "video_codes/SIRO" },
-            { title: "GANA", value: "video_codes/GANA" },
-          ],
-        },
-        {
-          name: "seriesId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示系列列表；填系列路径显示影片", value: "series/example" },
-            { title: "系列示例 rY2v", value: "https://javdb.com/series/rY2v" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "series" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadMakerUncensored",
-      title: "无码片商",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "片商", type: "constant", value: "makers/uncensored" },
-        {
-          name: "makerId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示无码片商列表；填列表里的片商路径显示作品", value: "makers/example" },
-            { title: "Heydouga", value: "https://javdb.com/makers/xZyO?f=download" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadMakerCensored",
-      title: "有码片商",
-      functionName: "loadList",
-      cacheDuration: 3600,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "片商", type: "constant", value: "makers" },
-        {
-          name: "makerId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "留空显示有码片商列表；填列表里的片商路径显示作品", value: "makers/example" },
-            { title: "S1 NO.1 STYLE", value: "https://javdb.com/makers/7R?f=download" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadMakerMadou",
-      title: "麻豆传媒",
-      functionName: "loadList",
-      cacheDuration: 1800,
-      requiresWebView: false,
-      params: [
-        { name: "category", title: "片商", type: "constant", value: "makers/N73g?f=download" },
-        {
-          name: "makerId",
-          title: "分类筛选",
-          type: "input",
-          value: "",
-          placeholders: [
-            { title: "麻豆传媒", value: "https://javdb.com/makers/N73g?f=download" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
-    {
-      id: "loadLatest",
-      title: "最近更新",
-      functionName: "loadList",
-      cacheDuration: 900,
-      requiresWebView: false,
-      params: [
-        {
-          name: "category",
-          title: "类别",
-          type: "enumeration",
-          value: "",
-          enumOptions: [
-            { title: "全部", value: "" },
-            { title: "有码", value: "censored" },
-            { title: "无码", value: "uncensored" },
-            { title: "欧美", value: "western" },
-            { title: "FC2", value: "fc2" },
-            { title: "动漫", value: "anime" },
-          ],
-        },
-        {
-          name: "sortType",
-          title: "排序",
-          type: "enumeration",
-          value: "1",
-          enumOptions: [
-            { title: "发布日期", value: "1" },
-            { title: "磁链更新", value: "2" },
-          ],
-        },
-        { name: "listKind", title: "列表类型", type: "constant", value: "video" },
-        { name: "genreId", title: "分类ID", type: "constant", value: "" },
-        { name: "peopleId", title: "演员ID", type: "constant", value: "" },
-        { name: "page", title: "页码", type: "page" },
-      ],
-    },
+    moduleEntry("loadCategories", "类别", 1800, [
+      enumParam("category", "类别", "", [["有码", "censored"], ["无码", "uncensored"], ["欧美", "western"], ["FC2", "fc2"], ["动漫", "anime"]]),
+      sortParam(true),
+    ].concat(commonListParams("video"))),
+    moduleEntry("loadRankings", "排行榜", 1800, [
+      enumParam("category", "排行榜", "rankings/movies", [["热门", "rankings/movies"], ["TOP250", "rankings/top250"], ["有码", "rankings/censored"], ["无码", "rankings/uncensored"], ["欧美", "rankings/western"], ["FC2", "rankings/fc2"], ["FANZA成人奖", "rankings/fanza_adult_award"]]),
+    ].concat(commonListParams("video"))),
+    actorModule("loadActorRecommended", "推荐演员", "actors", "推荐"),
+    actorModule("loadActorUncensored", "无码演员", "actors/uncensored", "无码"),
+    actorModule("loadActorCensored", "有码演员", "actors/censored", "有码"),
+    actorModule("loadActorWestern", "欧美演员", "actors/western", "欧美"),
+    moduleEntry("loadSeries", "系列", 3600, [
+      enumParam("category", "系列", "series", [["有码系列", "series"], ["无码", "series/uncensored"], ["欧美", "series/western"], ["LUXU", "video_codes/LUXU"], ["ARA", "video_codes/ARA"], ["MAAN", "video_codes/MAAN"], ["MIUM", "video_codes/MIUM"], ["SIRO", "video_codes/SIRO"], ["GANA", "video_codes/GANA"]]),
+      inputParam("seriesId", "分类筛选", "", [["留空显示系列列表；填系列路径显示影片", "series/example"], ["系列示例 rY2v", "https://javdb.com/series/rY2v"]]),
+    ].concat(commonListParams("series"))),
+    makerModule("loadMakerUncensored", "无码片商", "makers/uncensored", 3600, [["留空显示无码片商列表；填列表里的片商路径显示作品", "makers/example"], ["Heydouga", "https://javdb.com/makers/xZyO?f=download"]]),
+    makerModule("loadMakerCensored", "有码片商", "makers", 3600, [["留空显示有码片商列表；填列表里的片商路径显示作品", "makers/example"], ["S1 NO.1 STYLE", "https://javdb.com/makers/7R?f=download"]]),
+    makerModule("loadMakerMadou", "麻豆传媒", "makers/N73g?f=download", 1800, [["麻豆传媒", "https://javdb.com/makers/N73g?f=download"]]),
+    moduleEntry("loadLatest", "最近更新", 900, [
+      enumParam("category", "类别", "", [["全部", ""], ["有码", "censored"], ["无码", "uncensored"], ["欧美", "western"], ["FC2", "fc2"], ["动漫", "anime"]]),
+      sortParam(false),
+    ].concat(commonListParams("video"))),
   ],
   search: {
     title: "搜索",
     functionName: "search",
     params: [
-      { name: "keyword", title: "关键词", type: "input" },
-      {
-        name: "searchType",
-        title: "搜索范围",
-        type: "enumeration",
-        value: "all",
-        enumOptions: [
-          { title: "全部", value: "all" },
-          { title: "演员", value: "actor" },
-        ],
-      },
-      { name: "page", title: "页码", type: "page" },
-      {
-        name: "sortType",
-        title: "排序",
-        type: "enumeration",
-        value: "",
-        enumOptions: [
-          { title: "默认", value: "" },
-          { title: "发布日期", value: "1" },
-          { title: "磁链更新", value: "2" },
-        ],
-      },
+      inputParam("keyword", "关键词"),
+      enumParam("searchType", "搜索范围", "all", [["全部", "all"], ["演员", "actor"]]),
+      pageParam(),
+      sortParam(true),
     ],
   },
 };
+
+function moduleEntry(id, title, cacheDuration, params) {
+  return { id, title, functionName: "loadList", cacheDuration, requiresWebView: false, params };
+}
+
+function actorModule(id, title, category, label) {
+  return moduleEntry(id, title, 3600, [
+    constParam("category", "演员", category),
+    inputParam("actorId", "分类筛选", "", [["留空显示" + label + "演员列表；填列表里的演员路径显示作品", "actors/example"], ["演员示例 eKbnd", "https://javdb.com/actors/eKbnd"]]),
+  ].concat(commonListParams("actor")));
+}
+
+function makerModule(id, title, category, cacheDuration, placeholders) {
+  return moduleEntry(id, title, cacheDuration, [
+    constParam("category", "片商", category),
+    inputParam("makerId", "分类筛选", "", placeholders),
+  ].concat(commonListParams("maker")));
+}
+
+function commonListParams(kind) {
+  return [
+    constParam("listKind", "列表类型", kind),
+    constParam("genreId", "分类ID", ""),
+    constParam("peopleId", "演员ID", ""),
+    pageParam(),
+  ];
+}
+
+function inputParam(name, title, value, placeholders) {
+  const param = { name, title, type: "input", value: value || "" };
+  if (placeholders) param.placeholders = optionList(placeholders);
+  return param;
+}
+
+function enumParam(name, title, value, options) {
+  return { name, title, type: "enumeration", value, enumOptions: optionList(options) };
+}
+
+function sortParam(includeDefault) {
+  const options = includeDefault ? [["默认", ""], ["发布日期", "1"], ["磁链更新", "2"]] : [["发布日期", "1"], ["磁链更新", "2"]];
+  return enumParam("sortType", "排序", includeDefault ? "" : "1", options);
+}
+
+function constParam(name, title, value) {
+  return { name, title, type: "constant", value };
+}
+
+function pageParam() {
+  return { name: "page", title: "页码", type: "page" };
+}
+
+function optionList(list) {
+  return (list || []).map(function (item) {
+    return { title: item[0], value: item[1] };
+  });
+}
 
 const DEFAULT_BASE_URL = "https://javdb.com";
 const DEFAULT_LOGIN_COOKIE = "";
@@ -453,7 +170,7 @@ async function loadDetail(link) {
 async function loadEntityDetail(route, params = {}) {
   const href = pageUrl(params.baseUrl, route.path, 1, "");
   const html = await fetchPage(href, params);
-  const title = entityDetailTitle(html, route) || route.title || entityTitle(route.kind);
+  const title = entityDetailTitle(html, route) || entityTitle(route.kind);
   const poster = absolutize(
     firstByRe(html, /<meta\b[^>]*property=(["'])og:image\1[^>]*content=(["'])(.*?)\2/i, 3) ||
     firstImage(firstBlockByClass(html, "profile")) ||
@@ -464,7 +181,7 @@ async function loadEntityDetail(route, params = {}) {
   );
   const videos = parseVideoList(html, params.baseUrl);
   return {
-    id: encodeEntityLink(route.kind, route.path, title),
+    id: encodeEntityLink(route.kind, route.path),
     type: "url",
     mediaType: "movie",
     title,
@@ -472,7 +189,7 @@ async function loadEntityDetail(route, params = {}) {
     backdropPath: poster,
     backdropPaths: poster ? [poster] : [],
     description: entityTitle(route.kind) + (videos.length ? "\n" + videos.length + " 部影片" : ""),
-    link: encodeEntityLink(route.kind, route.path, title),
+    link: encodeEntityLink(route.kind, route.path),
     playerType: "system",
     episodeItems: videos,
     relatedItems: videos,
@@ -527,7 +244,7 @@ function parseVideoList(html, baseUrl) {
     const poster = bucket.poster || absolutize(firstImage(combinedHtml), baseUrl);
     const metas = unique(extractClassTexts(combinedHtml, "meta"));
     const releaseDate = dateOnly(firstMeta(metas, /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/));
-    const rawTitle = listTitle(combinedHtml, combinedHtml);
+    const rawTitle = listTitle(combinedHtml);
     const code = normalizeCode(firstMeta(metas, VIDEO_CODE_RE) || extractVideoCode(combinedHtml) || extractVideoCode(rawTitle));
     const title = formatVideoTitle(code, rawTitle);
     if (!title || isNoiseTitle(title)) continue;
@@ -613,21 +330,19 @@ function parseVideoDetail(html, href, baseUrl) {
   };
 }
 
-function listTitle(anchorHtml, around) {
+function listTitle(html) {
   const candidates = [];
-  pushTitleCandidate(candidates, attr(anchorHtml, "title"));
-  pushTitleCandidate(candidates, firstClassText(anchorHtml, "video-title"));
-  pushTitleCandidate(candidates, firstClassText(around, "video-title"));
-  pushTitleCandidate(candidates, firstClassText(around, "movie-title"));
-  pushTitleCandidate(candidates, firstClassText(around, "uid"));
-  pushTitleCandidate(candidates, imgAttr(anchorHtml, "alt"));
-  pushTitleCandidate(candidates, imgAttr(around, "alt"));
+  pushTitleCandidate(candidates, attr(html, "title"));
+  pushTitleCandidate(candidates, firstClassText(html, "video-title"));
+  pushTitleCandidate(candidates, firstClassText(html, "movie-title"));
+  pushTitleCandidate(candidates, firstClassText(html, "uid"));
+  pushTitleCandidate(candidates, imgAttr(html, "alt"));
 
   const anchorRe = /<a\b[^>]*href=(["'])([^"']*\/v\/[^"']+)["'][^>]*>[\s\S]*?<\/a>/gi;
   let match;
-  while ((match = anchorRe.exec(String(around || "")))) pushTitleCandidate(candidates, stripTags(stripListNoiseBlocks(match[0])));
+  while ((match = anchorRe.exec(String(html || "")))) pushTitleCandidate(candidates, stripTags(stripListNoiseBlocks(match[0])));
 
-  if (!candidates.length) pushTitleCandidate(candidates, stripTags(stripListNoiseBlocks(anchorHtml)));
+  if (!candidates.length) pushTitleCandidate(candidates, stripTags(stripListNoiseBlocks(html)));
   return bestTitleCandidate(candidates);
 }
 
@@ -740,14 +455,14 @@ function parseEntityList(html, baseUrl, kind) {
     const poster = absolutize(firstImage(anchorHtml) || firstImage(around), baseUrl);
     const description = firstClassText(around, "meta") || firstClassText(around, "count") || entityTitle(kind);
     out.push({
-      id: encodeEntityLink(kind, path, title),
+      id: encodeEntityLink(kind, path),
       type: "url",
       mediaType: "movie",
       title,
       posterPath: poster,
       backdropPath: poster,
       description,
-      link: encodeEntityLink(kind, path, title),
+      link: encodeEntityLink(kind, path),
       playerType: "system",
     });
   }
@@ -873,7 +588,7 @@ function entityRouteParam(raw, expectedKind, defaultPrefix) {
   const entity = decodeEntityLink(raw);
   if (entity && entity.kind === expectedKind) return entity.path;
   let route = raw;
-  if (/^https?:\/\//i.test(route)) route = routePathWithQueryFromUrl(route, DEFAULT_BASE_URL);
+  if (/^https?:\/\//i.test(route)) route = routePathFromUrl(route, DEFAULT_BASE_URL, true);
   route = cleanRoutePath(route.replace(/^detail:/, ""));
   if (!route) return "";
   if (route.indexOf(defaultPrefix) === 0) return route;
@@ -1052,14 +767,11 @@ function detailIdFromUrl(url) {
   return decodeURIComponent(firstByRe(String(url || ""), /\/v\/([^/?#]+)/i) || "");
 }
 
-function routePathFromUrl(url, baseUrl) {
+function routePathFromUrl(url, baseUrl, keepQuery) {
   const absolute = normalizeJavDbUrl(url, baseUrl);
-  return absolute.replace(/^https?:\/\/[^/]+\/?/i, "").split("#")[0].split("?")[0].replace(/^\/+|\/+$/g, "");
-}
-
-function routePathWithQueryFromUrl(url, baseUrl) {
-  const absolute = normalizeJavDbUrl(url, baseUrl);
-  return absolute.replace(/^https?:\/\/[^/]+\/?/i, "").split("#")[0].replace(/^\/+|\/+$/g, "");
+  let path = absolute.replace(/^https?:\/\/[^/]+\/?/i, "").split("#")[0];
+  if (!keepQuery) path = path.split("?")[0];
+  return path.replace(/^\/+|\/+$/g, "");
 }
 
 function pathMatchesPrefix(path, prefixes) {
