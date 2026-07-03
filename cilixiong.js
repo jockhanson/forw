@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.cilixiong",
   title: "磁力熊",
-  version: "1.0.1",
+  version: "1.0.2",
   requiredVersion: "0.0.1",
   description: "磁力熊电影、剧集、榜单、搜索、详情与授权播放源模块",
   author: "Forward",
@@ -9,7 +9,7 @@ WidgetMetadata = {
   detailCacheDuration: 60,
   globalParams: [
     inputParam("baseUrl", "站点地址", "https://www.cilixiong.org", [["磁力熊", "https://www.cilixiong.org"]]),
-    inputParam("playApiBase", "授权播放API", "", [["示例", "https://play.example.com"]]),
+    inputParam("playApiBase", "备用授权播放API", "", [["可选；站内解析失败时使用", "https://play.example.com"]]),
     inputParam("playApiToken", "播放API Token", "", [["Bearer Token，可留空", ""]]),
     enumParam("verifyAudio", "过滤无声源", "1", [["是", "1"], ["否", "0"]]),
   ],
@@ -46,7 +46,7 @@ WidgetMetadata = {
     },
     {
       id: "loadResource",
-      title: "授权播放源",
+      title: "播放源",
       functionName: "loadResource",
       type: "stream",
       requiresWebView: false,
@@ -172,7 +172,7 @@ async function loadDetail(link) {
     if (!isDetailPath(path)) return null;
     const html = await fetchPage(runtime.baseUrl + path, runtime);
     const item = parseVideoDetail(html, path, runtime.baseUrl);
-    return await enrichDetailWithAuthorizedSource(item, runtime);
+    return await enrichDetailWithPlayableSource(item, runtime, html, path);
   } catch (error) {
     console.error("[cilixiong][loadDetail] 失败:", error.message || error);
     throw error;
@@ -184,9 +184,15 @@ async function loadResource(params = {}) {
     const runtime = resourceRuntimeParams(params);
     const direct = directPlayableParam(params);
     if (direct) return [directResourceItem(direct, params)];
-    if (!runtime.playApiBase) return [];
 
     const payload = resourcePayload(params, runtime);
+    const path = normalizeDetailPath(payload.detailUrl || detailPathFromItemId(payload.itemId), runtime.baseUrl);
+    if (isDetailPath(path)) {
+      const html = await fetchPage(runtime.baseUrl + path, runtime);
+      const siteSources = await collectPagePlayableSources(html, path, runtime);
+      if (siteSources.length) return siteSources;
+    }
+    if (!runtime.playApiBase) return [];
     return await requestAuthorizedResources(payload, runtime);
   } catch (error) {
     console.error("[cilixiong][loadResource] 失败:", error.message || error);
@@ -361,10 +367,13 @@ function resourcePayload(params, runtime) {
   };
 }
 
-async function enrichDetailWithAuthorizedSource(item, runtime) {
-  if (!item || !runtime.playApiBase) return item;
+async function enrichDetailWithPlayableSource(item, runtime, html, path) {
+  if (!item) return item;
   try {
-    const sources = await requestAuthorizedResources(resourcePayload(item, runtime), runtime);
+    let sources = await collectPagePlayableSources(html, path, runtime);
+    if (!sources.length && runtime.playApiBase) {
+      sources = await requestAuthorizedResources(resourcePayload(item, runtime), runtime);
+    }
     const first = sources[0];
     if (!first) return item;
     item.videoUrl = first.url;
@@ -372,9 +381,160 @@ async function enrichDetailWithAuthorizedSource(item, runtime) {
     item.customHeaders = first.customHeaders || {};
     item.trailers = [{ coverUrl: item.posterPath || item.backdropPath || "", url: first.url }];
   } catch (error) {
-    console.log("[cilixiong][loadDetail] 授权播放源加载失败:", error.message || error);
+    console.log("[cilixiong][loadDetail] 播放源加载失败:", error.message || error);
   }
   return item;
+}
+
+async function collectPagePlayableSources(html, path, runtime) {
+  const detailUrl = runtime.baseUrl + path;
+  const candidates = [];
+  for (const source of extractPlayableSourcesFromHtml(html, detailUrl, runtime.baseUrl)) {
+    candidates.push(source);
+  }
+  const frames = extractPlayerFrameUrls(html, runtime.baseUrl);
+  for (let i = 0; i < frames.length; i++) {
+    try {
+      const frameHtml = await fetchPage(frames[i], runtime, detailUrl);
+      for (const source of extractPlayableSourcesFromHtml(frameHtml, frames[i], runtime.baseUrl)) {
+        candidates.push(source);
+      }
+    } catch (error) {
+      console.log("[cilixiong][collectPagePlayableSources] 播放 iframe 加载失败:", error.message || error);
+    }
+  }
+  const resolved = [];
+  for (const source of uniqueSourceCandidates(candidates)) {
+    const expanded = await resolveHlsSource(source, runtime);
+    for (const item of expanded) resolved.push(item);
+  }
+  return toResourceItems(resolved, runtime);
+}
+
+function extractPlayerFrameUrls(html, baseUrl) {
+  const urls = [];
+  const re = /<iframe\b[^>]*src=(["'])(.*?)\1/gi;
+  let match;
+  while ((match = re.exec(String(html || "")))) {
+    const url = absolutize(match[2], baseUrl);
+    if (/\/e\/extend\/jx\.php\b/i.test(url) || /(?:player|embed|play)/i.test(url)) urls.push(url);
+  }
+  return unique(urls);
+}
+
+function extractPlayableSourcesFromHtml(html, referer, baseUrl) {
+  const sources = [];
+  const text = String(html || "");
+  collectMediaMatches(sources, text, /\b(?:vurl|videoUrl|video_url|playUrl|play_url|hls|m3u8|src|file|url)\s*=\s*(["'])(https?:\/\/[^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)\1/gi, referer, baseUrl, 2);
+  collectMediaMatches(sources, text, /\b(?:url|src|file)\s*:\s*(["'])(https?:\/\/[^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)\1/gi, referer, baseUrl, 2);
+  collectMediaMatches(sources, text, /(https?:\/\/[^"'<>\\\s]+\.(?:m3u8|mp4)(?:\?[^"'<>\\\s]*)?)/gi, referer, baseUrl, 1);
+  return uniqueSourceCandidates(sources);
+}
+
+function collectMediaMatches(sources, text, re, referer, baseUrl, groupIndex) {
+  let match;
+  while ((match = re.exec(String(text || "")))) {
+    const url = absolutize(match[groupIndex], baseUrl);
+    if (!isHttpPlayableUrl(url)) continue;
+    sources.push({
+      url,
+      name: sourceNameFromUrl(url),
+      source: "磁力熊",
+      referer,
+      hasAudio: true,
+    });
+  }
+}
+
+async function resolveHlsSource(source, runtime) {
+  if (!/\.m3u8(?:[?#]|$)/i.test(source.url || "")) return [source];
+  try {
+    const res = await Widget.http.get(source.url, { headers: mediaHeaders(source.referer || runtime.baseUrl + "/") });
+    const playlist = String((res && res.data) || "");
+    const variants = parseHlsVariants(playlist, source.url);
+    if (!variants.length) return [source];
+    if (hasSeparateAudioRendition(playlist)) {
+      const best = bestVariant(variants);
+      return [copySource(source, {
+        name: best && best.resolution ? best.resolution + "P HLS Master" : "HLS Master",
+        height: best && best.resolution,
+        bandwidth: best && best.bandwidth,
+      })];
+    }
+    return [copySource(source, bestVariant(variants)), source];
+  } catch (error) {
+    console.log("[cilixiong][resolveHlsSource] HLS 清晰度解析失败:", error.message || error);
+    return [source];
+  }
+}
+
+function parseHlsVariants(playlist, playlistUrl) {
+  const lines = String(playlist || "").split(/\r?\n/);
+  const variants = [];
+  let pending = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = String(lines[i] || "").trim();
+    if (!line) continue;
+    if (/^#EXT-X-STREAM-INF:/i.test(line)) {
+      pending = {
+        bandwidth: Number(firstByRe(line, /BANDWIDTH=(\d+)/i, 1) || 0),
+        resolution: Number(firstByRe(line, /RESOLUTION=\d+x(\d+)/i, 1) || firstByRe(line, /RESOLUTION=(\d+)x\d+/i, 1) || 0),
+        codecs: attributeValue(line, "CODECS"),
+        audio: attributeValue(line, "AUDIO"),
+      };
+      continue;
+    }
+    if (pending && line.charAt(0) !== "#") {
+      variants.push({
+        url: absolutizeUrl(line, playlistUrl),
+        name: (pending.resolution || 0) + "P HLS",
+        height: pending.resolution,
+        bandwidth: pending.bandwidth,
+        hasAudio: hlsVariantKeepsAudio(pending),
+      });
+      pending = null;
+    }
+  }
+  return variants.filter((item) => isHttpPlayableUrl(item.url));
+}
+
+function bestVariant(variants) {
+  return (variants || []).slice().sort(function (a, b) {
+    return (b.height || 0) - (a.height || 0) || (b.bandwidth || 0) - (a.bandwidth || 0);
+  })[0] || null;
+}
+
+function hasSeparateAudioRendition(text) {
+  return /#EXT-X-MEDIA:[^\n\r]*TYPE=AUDIO/i.test(text || "") && /#EXT-X-STREAM-INF:[^\n\r]*AUDIO=/i.test(text || "");
+}
+
+function hlsVariantKeepsAudio(variant) {
+  const codecs = String((variant && variant.codecs) || "");
+  if (!codecs) return true;
+  return /mp4a|aac|ac-3|ec-3|opus/i.test(codecs);
+}
+
+function copySource(source, overrides) {
+  const result = {};
+  for (const key in source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) result[key] = source[key];
+  }
+  for (const key in (overrides || {})) {
+    if (Object.prototype.hasOwnProperty.call(overrides, key)) result[key] = overrides[key];
+  }
+  return result;
+}
+
+function uniqueSourceCandidates(candidates) {
+  const seen = {};
+  const result = [];
+  for (const item of candidates || []) {
+    const url = String((item && item.url) || "").trim();
+    if (!url || seen[url]) continue;
+    seen[url] = true;
+    result.push(item);
+  }
+  return result;
 }
 
 async function requestAuthorizedResources(payload, runtime) {
@@ -731,6 +891,43 @@ function sourceHeaders(source) {
   const userAgent = source.userAgent || source.user_agent;
   if (userAgent && !headers["User-Agent"]) headers["User-Agent"] = userAgent;
   return headers;
+}
+
+function mediaHeaders(referer) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    Accept: "*/*",
+  };
+  if (referer) headers.Referer = referer;
+  return headers;
+}
+
+function absolutizeUrl(value, baseUrl) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.indexOf("//") === 0) return "https:" + url;
+  const base = String(baseUrl || DEFAULT_BASE_URL);
+  const origin = getOrigin(base) || DEFAULT_BASE_URL;
+  if (url.charAt(0) === "/") return origin + url;
+  return base.replace(/[#?].*$/, "").replace(/\/[^/]*$/, "/") + url;
+}
+
+function attributeValue(line, name) {
+  const match = String(line || "").match(new RegExp(name + '=(?:"([^"]+)"|([^,\\s]+))', "i"));
+  return match ? String(match[1] || match[2] || "") : "";
+}
+
+function sourceNameFromUrl(url) {
+  const score = sourceQualityScore({}, url);
+  if (score) return score + "P HLS";
+  if (/\.m3u8(?:[?#]|$)/i.test(url)) return "HLS";
+  if (/\.mp4(?:[?#]|$)/i.test(url)) return "MP4";
+  return "播放源";
+}
+
+function getOrigin(url) {
+  return firstByRe(url, /^(https?:\/\/[^/]+)/i, 1);
 }
 
 function stableId(value) {
