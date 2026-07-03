@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.cilixiong",
   title: "磁力熊",
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.1",
   description: "磁力熊电影、剧集、榜单、搜索、详情与授权播放源模块",
   author: "Forward",
