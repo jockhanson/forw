@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.javdb",
   title: "JavDB",
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.1",
   description: "JavDB 列表、搜索与详情元数据模块",
   author: "Forward",
@@ -15,6 +15,7 @@ WidgetMetadata = {
       value: "https://javdb.com",
       placeholders: [
         { title: "JavDB", value: "https://javdb.com" },
+        { title: "JavDB", value: "https://javdb570.com" },
       ],
     },
     {
