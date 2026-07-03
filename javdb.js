@@ -101,8 +101,8 @@ WidgetMetadata = {
             { title: "有码", value: "rankings/censored" },
             { title: "无码", value: "rankings/uncensored" },
             { title: "欧美", value: "rankings/western" },
-            { title: "FC2", value: "rankings/fc2" },
-            { title: "FANZA(DMM)成人奖", value: "rankings/fanza_adult_award" },
+            { title: "FC2", value: "rankings/fc2" },x s
+            { title: "FANZA成人奖", value: "rankings/fanza_adult_award" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "video" },
@@ -118,14 +118,15 @@ WidgetMetadata = {
       cacheDuration: 3600,
       requiresWebView: false,
       params: [
-        { name: "category", title: "演员", type: "constant", value: "actors/eKbnd" },
+        { name: "category", title: "演员", type: "constant", value: "actors" },
         {
           name: "actorId",
           title: "分类筛选",
           type: "input",
           value: "",
           placeholders: [
-            { title: "分类", value: "actors/eKbnd" },
+            { title: "留空显示推荐演员列表；填列表里的演员路径显示作品", value: "actors/example" },
+            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -149,6 +150,7 @@ WidgetMetadata = {
           value: "",
           placeholders: [
             { title: "留空显示无码演员列表；填列表里的演员路径显示作品", value: "actors/example" },
+            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -172,6 +174,7 @@ WidgetMetadata = {
           value: "",
           placeholders: [
             { title: "留空显示有码演员列表；填列表里的演员路径显示作品", value: "actors/example" },
+            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -195,6 +198,7 @@ WidgetMetadata = {
           value: "",
           placeholders: [
             { title: "留空显示欧美演员列表；填列表里的演员路径显示作品", value: "actors/example" },
+            { title: "演员示例 eKbnd", value: "https://javdb.com/actors/eKbnd" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "actor" },
@@ -234,6 +238,7 @@ WidgetMetadata = {
           value: "",
           placeholders: [
             { title: "留空显示系列列表；填系列路径显示影片", value: "series/example" },
+            { title: "系列示例 rY2v", value: "https://javdb.com/series/rY2v" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "series" },
@@ -257,7 +262,7 @@ WidgetMetadata = {
           value: "",
           placeholders: [
             { title: "留空显示无码片商列表；填列表里的片商路径显示作品", value: "makers/example" },
-            { title: "Heydouga", value: "makers/xZyO" },
+            { title: "Heydouga", value: "https://javdb.com/makers/xZyO?f=download" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
@@ -281,7 +286,7 @@ WidgetMetadata = {
           value: "",
           placeholders: [
             { title: "留空显示有码片商列表；填列表里的片商路径显示作品", value: "makers/example" },
-            { title: "S1 NO.1 STYLE", value: "makers/7R" },
+            { title: "S1 NO.1 STYLE", value: "https://javdb.com/makers/7R?f=download" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
@@ -304,7 +309,7 @@ WidgetMetadata = {
           type: "input",
           value: "",
           placeholders: [
-            { title: "留空显示麻豆传媒作品；填片商路径显示对应作品", value: "makers/N73g?f=download" },
+            { title: "麻豆传媒", value: "https://javdb.com/makers/N73g?f=download" },
           ],
         },
         { name: "listKind", title: "列表类型", type: "constant", value: "maker" },
@@ -867,7 +872,7 @@ function entityRouteParam(raw, expectedKind, defaultPrefix) {
   const entity = decodeEntityLink(raw);
   if (entity && entity.kind === expectedKind) return entity.path;
   let route = raw;
-  if (/^https?:\/\//i.test(route)) route = routePathFromUrl(route, DEFAULT_BASE_URL);
+  if (/^https?:\/\//i.test(route)) route = routePathWithQueryFromUrl(route, DEFAULT_BASE_URL);
   route = cleanRoutePath(route.replace(/^detail:/, ""));
   if (!route) return "";
   if (route.indexOf(defaultPrefix) === 0) return route;
@@ -1049,6 +1054,11 @@ function detailIdFromUrl(url) {
 function routePathFromUrl(url, baseUrl) {
   const absolute = normalizeJavDbUrl(url, baseUrl);
   return absolute.replace(/^https?:\/\/[^/]+\/?/i, "").split("#")[0].split("?")[0].replace(/^\/+|\/+$/g, "");
+}
+
+function routePathWithQueryFromUrl(url, baseUrl) {
+  const absolute = normalizeJavDbUrl(url, baseUrl);
+  return absolute.replace(/^https?:\/\/[^/]+\/?/i, "").split("#")[0].replace(/^\/+|\/+$/g, "");
 }
 
 function pathMatchesPrefix(path, prefixes) {
