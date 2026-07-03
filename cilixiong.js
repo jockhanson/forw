@@ -171,7 +171,8 @@ async function loadDetail(link) {
     const path = normalizeDetailPath(link, runtime.baseUrl);
     if (!isDetailPath(path)) return null;
     const html = await fetchPage(runtime.baseUrl + path, runtime);
-    return parseVideoDetail(html, path, runtime.baseUrl);
+    const item = parseVideoDetail(html, path, runtime.baseUrl);
+    return await enrichDetailWithAuthorizedSource(item, runtime);
   } catch (error) {
     console.error("[cilixiong][loadDetail] 失败:", error.message || error);
     throw error;
@@ -181,15 +182,12 @@ async function loadDetail(link) {
 async function loadResource(params = {}) {
   try {
     const runtime = resourceRuntimeParams(params);
+    const direct = directPlayableParam(params);
+    if (direct) return [directResourceItem(direct, params)];
     if (!runtime.playApiBase) return [];
 
     const payload = resourcePayload(params, runtime);
-    const headers = buildHeaders(runtime, payload.detailUrl || runtime.baseUrl + "/");
-    headers["Content-Type"] = "application/json";
-    if (runtime.playApiToken) headers.Authorization = "Bearer " + runtime.playApiToken;
-
-    const res = await Widget.http.post(resolveEndpoint(runtime.playApiBase), payload, { headers });
-    return toResourceItems((res && res.data) || {}, runtime);
+    return await requestAuthorizedResources(payload, runtime);
   } catch (error) {
     console.error("[cilixiong][loadResource] 失败:", error.message || error);
     return [];
@@ -306,12 +304,12 @@ function toResourceItems(data, runtime) {
   const sources = sourceList(data);
   const items = [];
   for (let index = 0; index < sources.length; index++) {
-    const source = sources[index] || {};
+    const source = normalizeSource(sources[index]);
     const url = String(source.url || source.src || source.file || "").trim();
     if (!isHttpPlayableUrl(url)) continue;
     if (!sourceHasAudio(source, runtime.verifyAudio)) continue;
     const score = sourceQualityScore(source, url);
-    const headers = source.headers || source.customHeaders || {};
+    const headers = sourceHeaders(source);
     items.push({
       name: sourceName(source, score, index),
       description: sourceDescription(source, url),
@@ -338,13 +336,17 @@ function toResourceItems(data, runtime) {
 function sourceList(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data.sources)) return data.sources;
+  if (data.source) return [data.source];
   if (data.result && Array.isArray(data.result.sources)) return data.result.sources;
+  if (data.result && data.result.source) return [data.result.source];
   if (data.data && Array.isArray(data.data.sources)) return data.data.sources;
+  if (data.data && data.data.source) return [data.data.source];
   return [];
 }
 
 function resourcePayload(params, runtime) {
-  const path = normalizeDetailPath(params.detailUrl || params.link || params.url || "", runtime.baseUrl);
+  const inferredPath = detailPathFromItemId(params.itemId || params.videoId || params.id);
+  const path = normalizeDetailPath(params.detailUrl || params.link || params.detailLink || params.href || params.url || inferredPath, runtime.baseUrl);
   const detailUrl = String(params.detailUrl || "").trim() || (isDetailPath(path) ? runtime.baseUrl + path : "");
   const mediaType = params.mediaType || (isDetailPath(path) ? mediaTypeFromPath(path) : "movie");
   const title = String(params.title || params.name || "").trim();
@@ -357,6 +359,30 @@ function resourcePayload(params, runtime) {
     year: String(params.year || yearFromDate(params.releaseDate) || firstByRe(title, /((?:19|20)\d{2})/, 1) || "").trim(),
     posterPath: String(params.posterPath || params.cover || "").trim(),
   };
+}
+
+async function enrichDetailWithAuthorizedSource(item, runtime) {
+  if (!item || !runtime.playApiBase) return item;
+  try {
+    const sources = await requestAuthorizedResources(resourcePayload(item, runtime), runtime);
+    const first = sources[0];
+    if (!first) return item;
+    item.videoUrl = first.url;
+    item.playerType = first.playerType || PLAYER_TYPE;
+    item.customHeaders = first.customHeaders || {};
+    item.trailers = [{ coverUrl: item.posterPath || item.backdropPath || "", url: first.url }];
+  } catch (error) {
+    console.log("[cilixiong][loadDetail] 授权播放源加载失败:", error.message || error);
+  }
+  return item;
+}
+
+async function requestAuthorizedResources(payload, runtime) {
+  const headers = buildHeaders(runtime, payload.detailUrl || runtime.baseUrl + "/");
+  headers["Content-Type"] = "application/json";
+  if (runtime.playApiToken) headers.Authorization = "Bearer " + runtime.playApiToken;
+  const res = await Widget.http.post(resolveEndpoint(runtime.playApiBase), payload, { headers });
+  return toResourceItems((res && res.data) || {}, runtime);
 }
 
 function fetchPage(url, runtime, referer) {
@@ -582,6 +608,12 @@ function detailIdFromPath(path) {
   return (match[1].toLowerCase() === "drama" ? "tv" : "movie") + "-" + match[2];
 }
 
+function detailPathFromItemId(value) {
+  const match = String(value || "").match(/^(movie|tv|drama)-(\d+)$/i);
+  if (!match) return "";
+  return "/" + (match[1].toLowerCase() === "movie" ? "movie" : "drama") + "/" + match[2] + ".html";
+}
+
 function encodeGenreLink(mediaType, code, title) {
   return "genre:" + normalizeContentType(mediaType) + ":" + String(code || "0") + ":" + String(title || "");
 }
@@ -613,12 +645,21 @@ function numberOrUndefined(value) {
 
 function sourceHasAudio(source, verifyAudio) {
   if (!verifyAudio) return true;
-  const markers = [source.hasAudio, source.has_audio, source.audio, source.withAudio, source.with_audio];
-  for (let i = 0; i < markers.length; i++) {
-    if (markers[i] === false) return false;
-    const text = String(markers[i]).toLowerCase();
+  const audioMarkers = [source.hasAudio, source.has_audio, source.audio, source.withAudio, source.with_audio];
+  for (let i = 0; i < audioMarkers.length; i++) {
+    if (audioMarkers[i] === undefined || audioMarkers[i] === null || audioMarkers[i] === "") continue;
+    if (audioMarkers[i] === false) return false;
+    const text = String(audioMarkers[i]).toLowerCase();
     if (text === "false" || text === "0" || text === "no") return false;
   }
+  const noAudioMarkers = [source.videoOnly, source.video_only, source.muted, source.noAudio, source.no_audio];
+  for (let i = 0; i < noAudioMarkers.length; i++) {
+    if (noAudioMarkers[i] === true) return false;
+    const text = String(noAudioMarkers[i]).toLowerCase();
+    if (text === "true" || text === "1" || text === "yes") return false;
+  }
+  const searchable = [source.url, source.src, source.file, source.name, source.label, source.quality, source.description].join(" ");
+  if (/\b(?:no[-_ ]?audio|video[-_ ]?only|muted|silent)\b/i.test(searchable)) return false;
   return true;
 }
 
@@ -651,6 +692,45 @@ function isHttpPlayableUrl(url) {
   if (!/^https?:\/\//i.test(url)) return false;
   if (/^magnet:|^thunder:|^ed2k:/i.test(url)) return false;
   return true;
+}
+
+function directPlayableParam(params) {
+  const keys = ["videoUrl", "src", "file", "hls", "m3u8", "playUrl", "streamUrl", "url"];
+  for (let i = 0; i < keys.length; i++) {
+    const url = String(params[keys[i]] || "").trim();
+    if (!url || !isHttpPlayableUrl(url)) continue;
+    if (isDetailPath(normalizeDetailPath(url, params.baseUrl || DEFAULT_BASE_URL))) continue;
+    return url;
+  }
+  return "";
+}
+
+function directResourceItem(url, params) {
+  return {
+    name: sourceName(params, sourceQualityScore(params, url), 0),
+    description: sourceDescription(params, url),
+    url,
+    playerType: PLAYER_TYPE,
+    customHeaders: sourceHeaders(params),
+  };
+}
+
+function normalizeSource(source) {
+  if (typeof source === "string") return { url: source };
+  return source || {};
+}
+
+function sourceHeaders(source) {
+  const headers = {};
+  const input = source.headers || source.customHeaders || {};
+  for (const key in input) {
+    if (Object.prototype.hasOwnProperty.call(input, key)) headers[key] = input[key];
+  }
+  const referer = source.referer || source.referrer;
+  if (referer && !headers.Referer) headers.Referer = referer;
+  const userAgent = source.userAgent || source.user_agent;
+  if (userAgent && !headers["User-Agent"]) headers["User-Agent"] = userAgent;
+  return headers;
 }
 
 function stableId(value) {
