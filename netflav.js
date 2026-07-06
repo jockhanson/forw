@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.netflav",
   title: "Netflav",
-  version: "1.0.4",
+  version: "1.0.5",
   requiredVersion: "0.0.1",
   description: "Netflav 列表、搜索、详情、播放源与聚合搜索模块",
   author: "Forward",
@@ -471,7 +471,10 @@ function appendNestedAggregateCandidates(out, value = {}) {
   if (!value || typeof value !== "object") return;
   out.push(
     value.code,
+    value.javCode,
     value.videoId,
+    value.netflavVideoId,
+    value.providerVideoId,
     value.number,
     value.title,
     value.name,
@@ -662,6 +665,7 @@ function detailStreamMetadata(video = {}, params = {}, sources = []) {
   const videoId = String(video.videoId || video._id || video.id || "").trim();
   const title = cleanText(video.title || video.title_zh || video.title_en || video.code || videoId);
   const code = extractStreamSearchCodeFromVideo(video, params);
+  const publicId = code || videoId;
   const detailUrl = detailReferer(videoId, params);
   const actors = cleanPeople(video.actors);
   const tags = cleanTags(video.tags);
@@ -669,15 +673,19 @@ function detailStreamMetadata(video = {}, params = {}, sources = []) {
   const posterPath = cleanImage(video.preview || video.preview_hp);
   const previewUrl = playableUrl(video.previewVideo);
   const sourceItem = compactParams({
-    id: videoId,
-    videoId,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: videoId,
     netflavVideoId: videoId,
     code,
     number: code,
+    javCode: code,
     title,
     name: title,
     originalTitle: title,
     originalName: title,
+    fileName: code || title,
+    filename: code || title,
     link: encodeDetailLink(videoId),
     url: detailUrl,
     detailUrl,
@@ -691,11 +699,13 @@ function detailStreamMetadata(video = {}, params = {}, sources = []) {
     sourceProvider: WidgetMetadata.id,
     currentWidgetId: WidgetMetadata.id,
     site: WidgetMetadata.site,
-    id: videoId,
-    videoId,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: videoId,
     netflavVideoId: videoId,
     code,
     number: code,
+    javCode: code,
     title,
     name: title,
     originalTitle: title,
@@ -1588,6 +1598,19 @@ function playableUrl(url) {
 }
 
 function directNetflavVideoIdFromParams(params = {}, runtimeParams = {}) {
+  const providerValues = [
+    params.netflavVideoId,
+    params.providerVideoId,
+    params.sourceItem && params.sourceItem.netflavVideoId,
+    params.sourceItem && params.sourceItem.providerVideoId,
+    params.sourceItem && params.sourceItem.link,
+    params.sourceItem && params.sourceItem.detailUrl,
+  ];
+  for (const value of providerValues) {
+    const videoId = decodeDirectNetflavVideoId(value, runtimeParams);
+    if (videoId) return videoId;
+  }
+
   const linkValues = [params.link, params.detailUrl, params.pageUrl, params.url];
   for (const value of linkValues) {
     const videoId = decodeDirectNetflavVideoId(value, runtimeParams);
