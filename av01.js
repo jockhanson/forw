@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.av01",
   title: "AV01",
-  version: "1.0.2",
+  version: "1.0.3",
   requiredVersion: "0.0.1",
   description: "AV01 列表、搜索、详情与播放源模块",
   author: "Forward",
@@ -399,8 +399,9 @@ async function findVideoIdByCode(code, params = {}) {
 
 function detailStreamMetadata(video = {}, params = {}, geo) {
   const providerId = String(video.id || video.video_id || "");
-  const title = videoTitle(video, params);
-  const code = normalizeStreamCode(video.dvd_id || video.dmm_id || extractStreamCode(title));
+  const originalTitle = videoTitle(video, params);
+  const code = videoPublicCode(video, originalTitle);
+  const title = displayTitleWithCode(originalTitle, code);
   const publicId = code || providerId;
   const detailUrl = detailReferer(providerId, params);
   const poster = coverUrl(video, geo);
@@ -415,8 +416,8 @@ function detailStreamMetadata(video = {}, params = {}, geo) {
     javCode: code,
     title,
     name: title,
-    originalTitle: title,
-    originalName: title,
+    originalTitle,
+    originalName: originalTitle,
     fileName: code || title,
     filename: code || title,
     link: encodeDetailLink(providerId),
@@ -440,8 +441,8 @@ function detailStreamMetadata(video = {}, params = {}, geo) {
     javCode: code,
     title,
     name: title,
-    originalTitle: title,
-    originalName: title,
+    originalTitle,
+    originalName: originalTitle,
     keyword: code || title,
     searchKeyword: code || title,
     fileName: code || title,
@@ -461,7 +462,9 @@ function detailStreamMetadata(video = {}, params = {}, geo) {
 
 function toVideoItem(video = {}, params = {}, geo) {
   const id = String(video.id || video.video_id || video.dmm_id || video.dvd_id || "");
-  const title = videoTitle(video, params);
+  const originalTitle = videoTitle(video, params);
+  const code = videoPublicCode(video, originalTitle);
+  const title = displayTitleWithCode(originalTitle, code);
   const poster = coverUrl(video, geo);
   const preview = previewUrl(video, geo);
   return {
@@ -551,6 +554,19 @@ function detailDescription(video = {}, params = {}) {
 
 function videoTitle(video = {}, params = {}) {
   return cleanText(translatedValue(video.title, video.title_translations, params) || video.dvd_id || video.dmm_id || video.id);
+}
+
+function videoPublicCode(video = {}, fallbackTitle = "") {
+  return normalizeStreamCode(video.dvd_id || video.dmm_id || extractStreamCode(fallbackTitle));
+}
+
+function displayTitleWithCode(title, code) {
+  const cleanTitle = cleanText(title);
+  const cleanCode = normalizeStreamCode(code);
+  if (!cleanCode) return cleanTitle;
+  if (!cleanTitle) return cleanCode;
+  if (compareStreamCode(extractStreamCode(cleanTitle)) === compareStreamCode(cleanCode)) return cleanTitle;
+  return `${cleanCode} ${cleanTitle}`;
 }
 
 function translatedName(item = {}, params = {}) {
