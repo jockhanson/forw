@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.14",
+  version: "1.0.15",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
@@ -132,13 +132,16 @@ async function loadDetail(link) {
 async function loadResource(params = {}) {
   try {
     const saved = getRuntimeParams();
-    const runtimeParams = {
+    const runtimeParams = rememberRuntimeParams({
       baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl, {
         cfCookie: params.cfCookie || saved.cfCookie,
       }),
       cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
       userAgent: String(params.userAgent || saved.userAgent || "").trim(),
-    };
+    });
+    const direct = directPlayableParam(params);
+    if (direct) return toResourceItems([direct], runtimeParams, direct.referer || runtimeParams.baseUrl + "/");
+
     let href = inferDetailHref(params, runtimeParams.baseUrl);
     if (!href) {
       const code = extractStreamCodeFromParams(params);
@@ -152,16 +155,58 @@ async function loadResource(params = {}) {
     console.log("[bestjavporn][loadResource] 页面:", href);
     console.log("[bestjavporn][loadResource] 候选数:", candidates.length);
     candidates.forEach((c, i) => console.log("[bestjavporn][loadResource]  #" + i, c.url));
-    return candidates.map((candidate, index) => ({
-      name: playbackName(candidate.url, index),
-      description: candidate.source || "BestJavPorn",
-      url: candidate.url,
-      customHeaders: mediaHeaders(runtimeParams, href),
-    }));
+    return toResourceItems(candidates, runtimeParams, href);
   } catch (error) {
     console.error("[bestjavporn][loadResource] 失败:", error.message || error);
     return [];
   }
+}
+
+function toResourceItems(candidates, runtimeParams, href) {
+  return (candidates || []).filter((candidate) => candidate && candidate.url).map((candidate, index) => ({
+    name: candidate.name || playbackName(candidate.url, index),
+    description: candidate.description || candidate.source || "BestJavPorn",
+    url: candidate.url,
+    customHeaders: candidate.customHeaders || mediaHeaders(runtimeParams, candidate.referer || href),
+  }));
+}
+
+function directPlayableParam(params = {}) {
+  const candidates = [];
+  appendDirectPlayableCandidate(candidates, params);
+  appendDirectPlayableCandidate(candidates, params.sourceItem);
+  appendDirectPlayableCandidate(candidates, params.mediaSource);
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) appendDirectPlayableCandidate(candidates, source);
+  }
+  for (const candidate of candidates) {
+    if (isDirectPlayableUrl(candidate.url)) return candidate;
+  }
+  return null;
+}
+
+function appendDirectPlayableCandidate(out, value) {
+  if (!value) return;
+  if (typeof value === "string") {
+    out.push({ url: value });
+    return;
+  }
+  if (typeof value !== "object") return;
+  const url = firstString(value.videoUrl, value.playUrl, value.streamUrl, value.url, value.src, value.file);
+  const referer = playableReferer(value.referer || value.detailUrl || value.pageUrl || value.link);
+  out.push(compactObject({
+    url,
+    name: value.name || value.title,
+    description: value.description || value.source,
+    source: value.source,
+    referer,
+    customHeaders: value.customHeaders,
+  }));
+}
+
+function playableReferer(value) {
+  const decoded = decodeDetailLink(value);
+  return /^https?:\/\//i.test(decoded) ? decoded : "";
 }
 
 async function fetchPage(url, params = {}) {
@@ -238,6 +283,7 @@ function rememberRuntimeParams(params = {}) {
     userAgent: String(params.userAgent || saved.userAgent || "").trim(),
   };
   Widget.storage.set("bestjavporn.runtimeParams", next);
+  return next;
 }
 
 function getRuntimeParams() {
@@ -289,7 +335,8 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     firstImage(html),
     baseUrl
   );
-  const videoUrl = await selectBestPlayableUrl(html, href, baseUrl, params);
+  const videoSource = await selectBestPlayableSource(html, href, baseUrl, params);
+  const videoUrl = videoSource ? videoSource.url : "";
   const description = cleanText(
     firstByRe(html, /<meta\b[^>]*name=(["'])description\1[^>]*content=(["'])(.*?)\2/i, 3) ||
     firstByRe(html, /<div\b[^>]*class=(["'])[^"']*(?:entry-content|post-content|description)[^"']*\1[^>]*>([\s\S]*?)<\/div>/i, 2)
@@ -301,12 +348,13 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     role: "actor",
   }));
   const relatedItems = parseRelatedItems(html, baseUrl, href);
-  const sources = videoUrl ? [{ url: videoUrl, source: "BestJavPorn" }] : [];
+  const sources = videoSource && videoSource.url ? [videoSource] : [];
   const sourceItems = sources.map((source, index) => streamMediaSource(source, index, params, href));
+  const code = extractStreamCode(title) || extractStreamCode(description) || extractStreamCode(href);
   const streamMeta = detailStreamMetadata({
     href,
     title: title || stableId(href),
-    code: extractStreamCode(title || description),
+    code,
     poster,
     previewUrl: poster,
     description,
@@ -316,7 +364,8 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
   });
 
   return Object.assign({
-    type: "detail",
+    type: "url",
+    mediaType: "movie",
     title: title || stableId(href),
     posterPath: poster,
     backdropPath: poster,
@@ -350,7 +399,7 @@ async function findDetailHrefByCode(code, params = {}) {
 }
 
 function detailStreamMetadata(info = {}) {
-  const code = normalizeStreamCode(info.code || extractStreamCode(info.title));
+  const code = normalizeStreamCode(info.code || extractStreamCode(info.title) || extractStreamCode(info.description) || extractStreamCode(info.href));
   const providerId = stableId(info.href || info.title || code);
   const publicId = code || providerId;
   const detailUrl = info.href || "";
@@ -414,6 +463,7 @@ function detailStreamMetadata(info = {}) {
 }
 
 function streamMediaSource(source = {}, index, params = {}, href = "") {
+  const referer = source.referer || href;
   return compactObject({
     name: playbackName(source.url, index),
     title: playbackName(source.url, index),
@@ -422,8 +472,8 @@ function streamMediaSource(source = {}, index, params = {}, href = "") {
     streamUrl: source.url,
     playUrl: source.url,
     videoUrl: source.url,
-    referer: href,
-    customHeaders: mediaHeaders(params, href),
+    referer,
+    customHeaders: source.customHeaders || mediaHeaders(params, referer),
   });
 }
 
@@ -450,12 +500,17 @@ function parseTaxonomy(html, baseUrl, prefixes) {
 }
 
 async function selectBestPlayableUrl(html, referer, baseUrl, params = {}) {
+  const source = await selectBestPlayableSource(html, referer, baseUrl, params);
+  return source ? source.url : "";
+}
+
+async function selectBestPlayableSource(html, referer, baseUrl, params = {}) {
   const candidates = await collectPlayableCandidates(html, referer, baseUrl, params);
-  return candidates[0] ? candidates[0].url : "";
+  return candidates[0] || null;
 }
 
 async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
-  const candidates = extractMediaCandidates(html, baseUrl);
+  const candidates = extractMediaCandidates(html, baseUrl).map((candidate) => withCandidateReferer(candidate, referer));
   console.log("[bestjavporn][candidates] 页面直接提取:", candidates.length);
   candidates.forEach((c, i) => console.log("[bestjavporn][candidates]   #" + i, c.source, c.url));
 
@@ -468,7 +523,7 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
       console.log("[bestjavporn][candidates]   iframe 提取:", iframeUrl, "->", found.length);
       found.forEach((candidate) => {
         console.log("[bestjavporn][candidates]     ", candidate.url);
-        candidates.push({ url: candidate.url, source: "iframe:" + iframeUrl });
+        candidates.push({ url: candidate.url, source: "iframe:" + iframeUrl, referer: iframeUrl });
       });
     } catch (error) {
       console.log("[bestjavporn][video] iframe 解析失败:", iframeUrl, (error && error.message) || error);
@@ -480,7 +535,7 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   if (directMedia.length === 0) {
     console.log("[bestjavporn][candidates] 未发现直接视频 URL，尝试从脚本/JSON 提取...");
     const scriptMedia = await extractVideoFromScripts(html, referer, baseUrl, params);
-    scriptMedia.forEach((url) => candidates.push({ url, source: "script-probe" }));
+    scriptMedia.forEach((url) => candidates.push({ url, source: "script-probe", referer }));
     console.log("[bestjavporn][candidates] script-probe 新增:", scriptMedia.length);
   }
 
@@ -488,7 +543,7 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   if (directMedia2.length === 0) {
     console.log("[bestjavporn][candidates] 仍未发现直接视频 URL，尝试从播放器 API 提取...");
     const apiCandidates = await probePlayerApis(html, referer, baseUrl, params);
-    apiCandidates.forEach((url) => candidates.push({ url, source: "api-probe" }));
+    apiCandidates.forEach((url) => candidates.push({ url, source: "api-probe", referer }));
     console.log("[bestjavporn][candidates] api-probe 新增:", apiCandidates.length);
   }
 
@@ -496,7 +551,10 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   if (directMedia3.length === 0) {
     console.log("[bestjavporn][candidates] 尝试从 iframe 页面深度提取...");
     const deepCandidates = await deepProbeIframes(html, referer, baseUrl, params);
-    deepCandidates.forEach((url) => candidates.push({ url, source: "deep-iframe" }));
+    deepCandidates.forEach((candidate) => {
+      if (typeof candidate === "string") candidates.push({ url: candidate, source: "deep-iframe", referer });
+      else if (candidate && candidate.url) candidates.push({ url: candidate.url, source: candidate.source || "deep-iframe", referer: candidate.referer || referer });
+    });
     console.log("[bestjavporn][candidates] deep-iframe 新增:", deepCandidates.length);
   }
 
@@ -504,8 +562,9 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   console.log("[bestjavporn][candidates] 去重后:", deduped.length);
   const expanded = [];
   for (const candidate of deduped.sort((a, b) => mediaScore(b.url) - mediaScore(a.url))) {
-    const variants = await resolvePlayableVariants(candidate.url, referer, params);
-    variants.forEach((variant) => expanded.push({ url: variant, source: candidate.source }));
+    const candidateReferer = candidate.referer || referer;
+    const variants = await resolvePlayableVariants(candidate.url, candidateReferer, params);
+    variants.forEach((variant) => expanded.push({ url: variant, source: candidate.source, referer: candidateReferer }));
   }
   const result = uniqueCandidates(expanded).sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
   console.log("[bestjavporn][candidates] 最终:", result.length);
@@ -515,7 +574,7 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
     for (let i = 0; i < Math.min(result.length, 3); i++) {
       const url = result[i].url;
       if (/\.mp4(?:[?#]|$)/i.test(url)) {
-        const isFull = await isLikelyFullVideo(url, referer, params);
+        const isFull = await isLikelyFullVideo(url, result[i].referer || referer, params);
         if (!isFull) {
           console.log("[bestjavporn][candidates] 跳过疑似预览:", url);
           result.splice(i, 1);
@@ -541,7 +600,7 @@ async function deepProbeIframes(html, referer, baseUrl, params) {
       const iframeHtml = await fetchPageWithReferer(iframeUrl, params, referer);
       const mediaUrls = extractMediaCandidates(iframeHtml, iframeUrl);
       const directUrls = mediaUrls.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
-      directUrls.forEach((c) => found.push(c.url));
+      directUrls.forEach((c) => found.push({ url: c.url, source: "deep-iframe:" + iframeUrl, referer: iframeUrl }));
       console.log("[bestjavporn][deep-iframe]   ", iframeUrl, "直接视频:", directUrls.length);
 
       const nestedIframes = extractIframeUrls(iframeHtml, iframeUrl);
@@ -550,7 +609,7 @@ async function deepProbeIframes(html, referer, baseUrl, params) {
           const nestedHtml = await fetchPageWithReferer(nestedUrl, params, iframeUrl);
           const nestedMedia = extractMediaCandidates(nestedHtml, nestedUrl);
           const nestedDirect = nestedMedia.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
-          nestedDirect.forEach((c) => found.push(c.url));
+          nestedDirect.forEach((c) => found.push({ url: c.url, source: "deep-iframe:" + nestedUrl, referer: nestedUrl }));
           console.log("[bestjavporn][deep-iframe]     嵌套:", nestedUrl, "直接视频:", nestedDirect.length);
         } catch (e) {}
       }
@@ -1015,14 +1074,35 @@ function isPlayableCandidate(url) {
     /admin-ajax\.php\?/i.test(value);
 }
 
+function isDirectPlayableUrl(url) {
+  const value = String(url || "").trim();
+  return /^data:application\/(?:x-mpegurl|vnd\.apple\.mpegurl)/i.test(value) ||
+    /\.(?:m3u8|mp4|webm)(?:[?#]|$)/i.test(value);
+}
+
 function uniqueCandidates(candidates) {
   const seen = {};
-  return (candidates || []).filter((candidate) => {
+  const out = [];
+  for (const candidate of candidates || []) {
     const key = String((candidate && candidate.url) || "").split("#")[0];
-    if (!key || seen[key]) return false;
-    seen[key] = true;
-    return true;
-  });
+    if (!key) continue;
+    const existing = seen[key];
+    if (existing) {
+      if (!existing.referer && candidate.referer) existing.referer = candidate.referer;
+      if (!existing.customHeaders && candidate.customHeaders) existing.customHeaders = candidate.customHeaders;
+      if (!existing.source && candidate.source) existing.source = candidate.source;
+      continue;
+    }
+    seen[key] = candidate;
+    out.push(candidate);
+  }
+  return out;
+}
+
+function withCandidateReferer(candidate, referer) {
+  if (!candidate || !candidate.url) return candidate;
+  if (candidate.referer) return candidate;
+  return Object.assign({}, candidate, { referer });
 }
 
 function normalizeEscapedText(value) {
@@ -1092,6 +1172,14 @@ function firstRating(html) {
   const value = firstByRe(html, /\b(?:rating|rate|views?|HD)\D{0,20}(\d{1,3})(?:\b|%)/i);
   const num = Number(value);
   return Number.isFinite(num) && num > 0 && num <= 100 ? num : undefined;
+}
+
+function firstString() {
+  for (let index = 0; index < arguments.length; index++) {
+    const value = String(arguments[index] || "").trim();
+    if (value) return value;
+  }
+  return "";
 }
 
 function firstByRe(text, re, group) {
@@ -1286,7 +1374,7 @@ function extractStreamCode(value, options = {}) {
     const match = text.match(item[1]);
     if (match) return item[0] + "-" + match[1];
   }
-  const generic = text.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_ ]?([A-Z]{1,4}))?\b/i);
+  const generic = text.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_]([A-Z]{1,4}))?\b/i);
   if (generic) return generic[1].toUpperCase() + "-" + generic[2].toUpperCase() + (generic[3] ? "-" + generic[3].toUpperCase() : "");
   if (allowPureNumeric) {
     const num = text.match(/\b(\d{4,8})\b/);

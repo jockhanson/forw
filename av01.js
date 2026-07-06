@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.av01",
   title: "AV01",
-  version: "1.0.3",
+  version: "1.0.4",
   requiredVersion: "0.0.1",
   description: "AV01 列表、搜索、详情与播放源模块",
   author: "Forward",
@@ -210,14 +210,14 @@ async function loadResource(params = {}) {
     const direct = directPlayableParam(params);
     if (direct) {
       return [{
-        name: playbackName(direct, 0),
-        description: "AV01",
-        url: direct,
-        customHeaders: mediaHeaders(runtimeParams, detailReferer(params.id || "", runtimeParams)),
+        name: direct.name || playbackName(direct.url, 0),
+        description: direct.description || direct.source || "AV01",
+        url: direct.url,
+        customHeaders: direct.customHeaders || mediaHeaders(runtimeParams, direct.referer || detailReferer(params.av01VideoId || "", runtimeParams)),
       }];
     }
 
-    let videoId = inferVideoId(params);
+    let videoId = inferVideoId(params, runtimeParams);
     if (!videoId) {
       const code = extractStreamCodeFromParams(params);
       if (code) videoId = await findVideoIdByCode(code, runtimeParams);
@@ -382,19 +382,22 @@ function toDetailItem(video = {}, params = {}, geo, relatedItems = []) {
 }
 
 async function findVideoIdByCode(code, params = {}) {
-  try {
-    const body = {
-      query: code,
-      pagination: { page: 1, limit: PAGE_LIMIT },
-    };
-    const data = await apiPost("videos/search", body, params, { lang: params.lang });
-    const videos = listFromResponse(data);
-    const matched = videos.find((video) => videoMatchesStreamCode(video, code));
-    return matched ? String(matched.id || matched.video_id || "") : "";
-  } catch (error) {
-    console.log("[av01][aggregate] 搜索失败:", code, error.message || error);
-    return "";
+  const keys = aggregateSearchKeys(code);
+  for (const key of keys) {
+    try {
+      const body = {
+        query: key,
+        pagination: { page: 1, limit: PAGE_LIMIT },
+      };
+      const data = await apiPost("videos/search", body, params, { lang: params.lang });
+      const videos = listFromResponse(data);
+      const matched = videos.find((video) => videoMatchesStreamCode(video, code));
+      if (matched) return String(matched.id || matched.video_id || "");
+    } catch (error) {
+      console.log("[av01][aggregate] 搜索失败:", key, error.message || error);
+    }
   }
+  return "";
 }
 
 function detailStreamMetadata(video = {}, params = {}, geo) {
@@ -407,6 +410,10 @@ function detailStreamMetadata(video = {}, params = {}, geo) {
   const poster = coverUrl(video, geo);
   const preview = previewUrl(video, geo);
   const sourceItem = compactObject({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
     id: publicId,
     videoId: publicId,
     providerVideoId: providerId,
@@ -471,7 +478,22 @@ function toVideoItem(video = {}, params = {}, geo) {
     id: id || stableId(title),
     type: "url",
     mediaType: "movie",
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    providerVideoId: id,
+    av01VideoId: id,
+    code,
+    number: code,
+    javCode: code,
+    originalTitle,
+    originalName: originalTitle,
+    keyword: code || title,
+    searchKeyword: code || title,
+    fileName: code || title,
+    filename: code || title,
     title: title || id || "AV01",
+    name: title || id || "AV01",
     posterPath: poster,
     backdropPath: poster,
     previewUrl: preview,
@@ -557,7 +579,18 @@ function videoTitle(video = {}, params = {}) {
 }
 
 function videoPublicCode(video = {}, fallbackTitle = "") {
-  return normalizeStreamCode(video.dvd_id || video.dmm_id || extractStreamCode(fallbackTitle));
+  return normalizeStreamCode(
+    video.dvd_id ||
+    video.dmm_id ||
+    video.code ||
+    video.number ||
+    video.javCode ||
+    video.jav_code ||
+    extractStreamCode(fallbackTitle) ||
+    extractStreamCode(video.title) ||
+    extractStreamCode(video.name) ||
+    extractStreamCode(video.description)
+  );
 }
 
 function displayTitleWithCode(title, code) {
@@ -679,7 +712,7 @@ function parseRoute(value, fallbackType) {
   return { type, id };
 }
 
-function inferVideoId(params = {}) {
+function inferVideoId(params = {}, runtimeParams = {}) {
   const explicitCandidates = [
     params.av01VideoId,
     params.sourceItem && params.sourceItem.av01VideoId,
@@ -689,24 +722,54 @@ function inferVideoId(params = {}) {
     if (id && !isPlayableUrl(id)) return id;
   }
 
-  const candidates = [
-    params.providerVideoId,
-    params.sourceItem && params.sourceItem.providerVideoId,
-    params.sourceItem && params.sourceItem.link,
+  const trustedProviderCandidates = [];
+  if (isAv01ProviderContext(params)) {
+    trustedProviderCandidates.push(params.providerVideoId, params.videoId, params.id);
+  }
+  if (isAv01ProviderContext(params.sourceItem)) {
+    trustedProviderCandidates.push(params.sourceItem.providerVideoId, params.sourceItem.videoId, params.sourceItem.id);
+  }
+  for (const candidate of trustedProviderCandidates) {
+    const id = decodeDetailLink(candidate);
+    if (id && !isPlayableUrl(id) && !isLikelyPublicStreamCode(id)) return id;
+  }
+
+  const detailCandidates = [
     params.link,
     params.detailUrl,
     params.pageUrl,
     params.url,
     params.href,
-    params.videoId,
-    params.id,
+    params.sourceItem && params.sourceItem.link,
+    params.sourceItem && params.sourceItem.detailUrl,
+    params.sourceItem && params.sourceItem.pageUrl,
+    params.sourceItem && params.sourceItem.url,
   ];
-  for (const candidate of candidates) {
-    const id = decodeDetailLink(candidate);
-    if (!id || isPlayableUrl(id) || isLikelyPublicStreamCode(id)) continue;
+  const allowBareDetailId = isAv01ProviderContext(params) || isAv01ProviderContext(params.sourceItem);
+  for (const candidate of detailCandidates) {
+    const id = decodeAv01DetailId(candidate, runtimeParams, allowBareDetailId);
+    if (!id) continue;
     return id;
   }
   return "";
+}
+
+function isAv01ProviderContext(value = {}) {
+  if (!value || typeof value !== "object") return false;
+  const candidates = [
+    value.provider,
+    value.sourceProvider,
+    value.currentWidgetId,
+    value.widgetId,
+    value.moduleId,
+    value.site,
+  ];
+  for (const candidate of candidates) {
+    const text = String(candidate || "").toLowerCase();
+    if (text === WidgetMetadata.id || text === "av01") return true;
+    if (text.indexOf("av01.media") >= 0) return true;
+  }
+  return false;
 }
 
 function isLikelyPublicStreamCode(value) {
@@ -716,12 +779,40 @@ function isLikelyPublicStreamCode(value) {
 }
 
 function directPlayableParam(params = {}) {
-  const candidates = [params.videoUrl, params.url, params.src, params.file];
-  for (const candidate of candidates) {
-    const url = String(candidate || "").trim();
-    if (isDirectPlayableUrl(url)) return url;
+  const candidates = [];
+  appendDirectPlayableCandidate(candidates, params);
+  appendDirectPlayableCandidate(candidates, params.sourceItem);
+  appendDirectPlayableCandidate(candidates, params.mediaSource);
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) appendDirectPlayableCandidate(candidates, source);
   }
-  return "";
+  for (const candidate of candidates) {
+    if (isDirectPlayableUrl(candidate.url)) return candidate;
+  }
+  return null;
+}
+
+function appendDirectPlayableCandidate(out, value) {
+  if (!value) return;
+  if (typeof value === "string") {
+    out.push({ url: value });
+    return;
+  }
+  if (typeof value !== "object") return;
+  const url = firstString(value.videoUrl, value.playUrl, value.streamUrl, value.url, value.src, value.file);
+  out.push(compactObject({
+    url,
+    name: value.name || value.title,
+    description: value.description || value.source,
+    source: value.source,
+    referer: directPlayableReferer(value.referer || value.detailUrl || value.pageUrl || value.link),
+    customHeaders: value.customHeaders,
+  }));
+}
+
+function directPlayableReferer(value) {
+  const decoded = decodeDetailLink(value);
+  return /^https?:\/\//i.test(decoded) ? decoded : "";
 }
 
 function playlistSource(value) {
@@ -935,6 +1026,24 @@ function decodeDetailLink(link) {
   return /^\d+$/.test(value) ? value : "";
 }
 
+function decodeAv01DetailId(link, params = {}, allowBareId = false) {
+  const value = String(link || "").trim();
+  if (!value || isDirectPlayableUrl(value)) return "";
+  const decoded = value.startsWith("detail:") ? value.slice("detail:".length) : value;
+  if (/^\d+$/.test(decoded)) return allowBareId ? decoded : "";
+  const match = decoded.match(/^https?:\/\/([^/?#]+)\/(?:[a-z]{2}\/)?video\/(\d+)(?:[/?#]|$)/i);
+  if (!match) return "";
+  const host = match[1].toLowerCase();
+  const baseHost = hostFromUrl(params.baseUrl || DEFAULT_BASE_URL);
+  if (host === baseHost || /\.av01\.media$/i.test(host) || host === "www.av01.media") return match[2];
+  return "";
+}
+
+function hostFromUrl(url) {
+  const match = String(url || "").match(/^https?:\/\/([^/?#]+)/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
 function detailReferer(videoId, params = {}) {
   const baseUrl = normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL);
   const lang = String(params.lang || DEFAULT_LANG).replace(/^\/+|\/+$/g, "");
@@ -1107,6 +1216,10 @@ function videoMatchesStreamCode(video = {}, code = "") {
   const target = compareStreamCode(code);
   if (!target) return false;
   const candidates = [
+    video.code,
+    video.number,
+    video.javCode,
+    video.jav_code,
     video.dvd_id,
     video.dmm_id,
     video.id,
@@ -1123,11 +1236,24 @@ function videoMatchesStreamCode(video = {}, code = "") {
   return false;
 }
 
+function aggregateSearchKeys(code) {
+  const value = normalizeStreamCode(code);
+  const compact = compareStreamCode(value);
+  const noDash = value.replace(/-/g, "");
+  const spaced = value.replace(/-/g, " ");
+  const keys = [value, noDash, compact, spaced];
+  if (/^FC2-\d+$/i.test(value)) keys.push(value.replace(/^FC2-/i, "FC2 PPV "));
+  return unique(keys).filter(Boolean);
+}
+
 function extractStreamCodeFromParams(params = {}) {
   const candidates = [
     params.code,
     params.number,
     params.javCode,
+    params.jav_code,
+    params.keyword,
+    params.searchKeyword,
     params.videoId,
     params.id,
     params.title,
@@ -1136,6 +1262,8 @@ function extractStreamCodeFromParams(params = {}) {
     params.originalName,
     params.fileName,
     params.filename,
+    params.originalFilename,
+    params.providerDetailUrl,
     params.description,
     params.link,
     params.url,
@@ -1161,7 +1289,29 @@ function extractStreamCodeFromParams(params = {}) {
 
 function appendNestedStreamCandidates(out, value = {}) {
   if (!value || typeof value !== "object") return;
-  out.push(value.code, value.number, value.javCode, value.videoId, value.id, value.title, value.name, value.fileName, value.filename, value.link, value.url, value.detailUrl, value.pageUrl, value.description);
+  out.push(
+    value.code,
+    value.number,
+    value.javCode,
+    value.jav_code,
+    value.keyword,
+    value.searchKeyword,
+    value.videoId,
+    value.id,
+    value.title,
+    value.name,
+    value.originalTitle,
+    value.originalName,
+    value.fileName,
+    value.filename,
+    value.originalFilename,
+    value.providerDetailUrl,
+    value.link,
+    value.url,
+    value.detailUrl,
+    value.pageUrl,
+    value.description
+  );
 }
 
 function collectStringValues(value, depth = 0, out = [], visited = []) {
