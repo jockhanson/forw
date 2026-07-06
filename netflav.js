@@ -1,9 +1,9 @@
 WidgetMetadata = {
   id: "forward.netflav",
   title: "Netflav",
-  version: "1.0.3",
+  version: "1.0.4",
   requiredVersion: "0.0.1",
-  description: "Netflav 列表、搜索、详情与播放源模块",
+  description: "Netflav 列表、搜索、详情、播放源与聚合搜索模块",
   author: "Forward",
   site: "https://netflav.com/",
   detailCacheDuration: 60,
@@ -96,6 +96,7 @@ WidgetMetadata = {
     {
       id: "loadResource",
       title: "Netflav 播放源",
+      description: "直接解析 Netflav 链接，或按番号聚合搜索 Netflav 播放源",
       functionName: "loadResource",
       type: "stream",
       params: [],
@@ -210,14 +211,343 @@ async function loadResource(params = {}) {
       const sources = await resolveHighestQualityCandidates([{ url: directUrl, referer: params.referer || runtimeParams.baseUrl + "/" }], runtimeParams);
       return toResourceItems(sources, runtimeParams, runtimeParams.baseUrl + "/");
     }
-    const videoId = decodeDetailLink(params.link || params.id || params.videoId || params.url);
-    if (!videoId) return [];
-    const detail = await fetchVideoDetail(videoId, runtimeParams);
-    const sources = await collectPlayableSourcesWithFallback(detail, runtimeParams);
-    return toResourceItems(sources, runtimeParams, detailReferer(detail && detail.videoId, runtimeParams));
+    const videoId = directNetflavVideoIdFromParams(params, runtimeParams);
+    if (videoId) {
+      try {
+        const detail = await fetchVideoDetail(videoId, runtimeParams);
+        const sources = await collectPlayableSourcesWithFallback(detail, runtimeParams);
+        return toResourceItems(sources, runtimeParams, detailReferer(detail && detail.videoId, runtimeParams));
+      } catch (error) {
+        console.error("[netflav][loadResource] 直接解析失败，尝试聚合搜索:", error.message || error);
+      }
+    }
+    return await loadAggregateSearchResource(params, runtimeParams);
   } catch (error) {
     console.error("[netflav][loadResource] 失败:", error.message || error);
     return [];
+  }
+}
+
+async function loadAggregateSearchResource(params = {}, runtimeParams = {}) {
+  const code = extractAggregateCodeFromParams(params);
+  if (!code) {
+    console.log("[netflav][aggregate] 当前视频信息中未找到番号，跳过 Netflav 聚合搜索");
+    return [];
+  }
+
+  console.log("[netflav][aggregate] 提取到番号:", code);
+  const matches = await findNetflavVideosByCode(code, runtimeParams);
+  if (!matches.length) {
+    console.log("[netflav][aggregate] 未找到 Netflav 精确匹配:", code);
+    return [];
+  }
+
+  const resources = [];
+  const seenUrls = {};
+  for (const video of matches.slice(0, 3)) {
+    const videoId = String(video.videoId || video._id || video.id || "").trim();
+    if (!videoId) continue;
+    try {
+      const fetched = await fetchVideoDetail(videoId, runtimeParams);
+      const detail = Object.assign({}, fetched || video, {
+        videoId: String((fetched && (fetched.videoId || fetched._id || fetched.id)) || videoId),
+      });
+      const sources = await collectPlayableSourcesFallbackChain(detail, runtimeParams, false);
+      const items = toAggregateResourceItems(detail, code, sources, runtimeParams);
+      for (const item of items) {
+        if (!item.url || seenUrls[item.url]) continue;
+        seenUrls[item.url] = true;
+        resources.push(item);
+      }
+    } catch (error) {
+      console.error("[netflav][aggregate] 匹配项解析失败:", videoId, error.message || error);
+    }
+  }
+
+  return resources;
+}
+
+async function findNetflavVideosByCode(code, params = {}) {
+  const candidates = [];
+  const keys = aggregateSearchKeys(code);
+  for (const key of keys) {
+    try {
+      const data = await apiGet("/video/advanceSearchVideo", params, {
+        type: "title",
+        page: 1,
+        keyword: key,
+      });
+      candidates.push.apply(candidates, parseResultList(data));
+    } catch (error) {
+      console.error("[netflav][aggregate] 搜索失败:", key, error.message || error);
+    }
+  }
+
+  const exact = uniqueObjects(candidates).filter((video) => videoMatchesAggregateCode(video, code));
+  return sortAggregateMatches(exact, code);
+}
+
+function aggregateSearchKeys(code) {
+  const value = cleanText(code);
+  const compact = normalizeAggregateCodeForCompare(value);
+  const keys = [value, value.replace(/-/g, ""), compact];
+  const hyphenated = hyphenatedAggregateCode(compact);
+  if (hyphenated) keys.push(hyphenated);
+  return unique(keys).filter(Boolean);
+}
+
+function hyphenatedAggregateCode(compact) {
+  const value = String(compact || "").toUpperCase();
+  const special = value.match(/^(FC2|CARIB|1PONDO|HEYZO|T28)(?:PPV)?(\d{3,10})$/i);
+  if (special) return special[1].toUpperCase() + "-" + special[2];
+  const generic = value.match(/^([A-Z]{2,15})(\d{2,10}[A-Z]?)([A-Z]{0,4})$/);
+  if (!generic) return "";
+  return generic[1] + "-" + generic[2] + (generic[3] ? "-" + generic[3] : "");
+}
+
+function videoMatchesAggregateCode(video = {}, code = "") {
+  const target = normalizeAggregateCodeForCompare(code);
+  if (!target) return false;
+  const candidates = aggregateVideoCodeCandidates(video);
+  for (const value of candidates) {
+    const extracted = extractAggregateSearchCode(value, { allowPureNumeric: true });
+    if (normalizeAggregateCodeForCompare(extracted) === target) return true;
+  }
+  return false;
+}
+
+function sortAggregateMatches(videos = [], code = "") {
+  return (videos || []).slice().sort((a, b) => aggregateMatchScore(b, code) - aggregateMatchScore(a, code));
+}
+
+function aggregateMatchScore(video = {}, code = "") {
+  const target = normalizeAggregateCodeForCompare(code);
+  let score = 0;
+  const title = cleanText(video.title || video.title_zh || video.title_en || "");
+  const videoCode = cleanText(video.code || video.number || "");
+  if (normalizeAggregateCodeForCompare(extractAggregateSearchCode(videoCode, { allowPureNumeric: true })) === target) score += 80;
+  if (normalizeAggregateCodeForCompare(extractAggregateSearchCode(title, { allowPureNumeric: true })) === target) score += 60;
+  if (normalizeAggregateCodeForCompare(title).indexOf(target) >= 0) score += 20;
+  if (video.videoId || video._id || video.id) score += 5;
+  return score;
+}
+
+function aggregateVideoCodeCandidates(video = {}) {
+  return [
+    video.code,
+    video.number,
+    video.videoId,
+    video._id,
+    video.id,
+    video.title,
+    video.title_zh,
+    video.title_en,
+    video.description,
+    video.preview,
+    video.preview_hp,
+  ];
+}
+
+function extractStreamSearchCodeFromVideo(video = {}, params = {}) {
+  const priorityCandidates = [
+    video.code,
+    video.number,
+    video.title,
+    video.title_zh,
+    video.title_en,
+    video.videoId,
+    video._id,
+    video.id,
+    video.description,
+    params.code,
+    params.number,
+    params.title,
+    params.name,
+    params.originalTitle,
+    params.originalName,
+    params.fileName,
+    params.filename,
+    params.link,
+    params.url,
+    params.detailUrl,
+    params.pageUrl,
+  ];
+
+  appendNestedAggregateCandidates(priorityCandidates, params.sourceItem);
+  appendNestedAggregateCandidates(priorityCandidates, params.info);
+  appendNestedAggregateCandidates(priorityCandidates, params.mediaSource);
+
+  for (const value of priorityCandidates) {
+    const code = extractAggregateSearchCode(value, { allowPureNumeric: true });
+    if (code) return code;
+  }
+
+  for (const value of collectStringValues([video, params])) {
+    const code = extractAggregateSearchCode(value, { allowPureNumeric: false });
+    if (code) return code;
+  }
+
+  return extractSupjavSearchCodeFromVideo(video, params);
+}
+
+function toAggregateResourceItems(video = {}, code = "", sources = [], params = {}) {
+  const videoId = String(video.videoId || video._id || video.id || "").trim();
+  const title = cleanText(video.title || video.title_zh || video.title_en || video.code || code);
+  const referer = detailReferer(videoId, params);
+  return toResourceItems(sources, params, referer).map((item) => ({
+    name: item.name.indexOf("Netflav ") === 0 ? item.name : "Netflav " + item.name,
+    description: [
+      "番号：" + code,
+      "来源：" + (item.description || "Netflav"),
+      title ? "标题：" + title : "",
+      referer ? "详情页：" + referer : "",
+    ].filter(Boolean).join("\n"),
+    url: item.url,
+    playerType: item.playerType || VIDEO_PLAYER_TYPE,
+    customHeaders: item.customHeaders,
+  }));
+}
+
+function extractAggregateCodeFromParams(params = {}) {
+  const priorityCandidates = [
+    params.code,
+    params.videoId,
+    params.number,
+    params.fileName,
+    params.filename,
+    params.file_name,
+    params.name,
+    params.path,
+    params.filePath,
+    params.file_path,
+    params.mediaPath,
+    params.media_path,
+    params.itemPath,
+    params.item_path,
+    params.localPath,
+    params.local_path,
+    params.originalFilename,
+    params.originalFileName,
+    params.id,
+    params.title,
+    params.seriesName,
+    params.originalTitle,
+    params.originalName,
+    params.episodeName,
+    params.description,
+    params.genreTitle,
+    params.overview,
+    params.link,
+    params.url,
+    params.videoUrl,
+    params.playUrl,
+    params.streamUrl,
+  ];
+
+  appendNestedAggregateCandidates(priorityCandidates, params.tmdbInfo);
+  appendNestedAggregateCandidates(priorityCandidates, params.info);
+  appendNestedAggregateCandidates(priorityCandidates, params.sourceItem);
+  appendNestedAggregateCandidates(priorityCandidates, params.mediaSource);
+
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) appendNestedAggregateCandidates(priorityCandidates, source);
+  }
+
+  for (const value of priorityCandidates) {
+    const code = extractAggregateSearchCode(value, { allowPureNumeric: true });
+    if (code) return code;
+  }
+
+  const allStrings = collectStringValues(params);
+  for (const value of allStrings) {
+    const code = extractAggregateSearchCode(value, { allowPureNumeric: false });
+    if (code) return code;
+  }
+
+  return "";
+}
+
+function appendNestedAggregateCandidates(out, value = {}) {
+  if (!value || typeof value !== "object") return;
+  out.push(
+    value.code,
+    value.videoId,
+    value.number,
+    value.title,
+    value.name,
+    value.originalTitle,
+    value.originalName,
+    value.fileName,
+    value.filename,
+    value.path,
+    value.url,
+    value.link,
+    value.streamUrl,
+    value.description,
+    value.overview
+  );
+}
+
+function extractAggregateSearchCode(text, options = {}) {
+  const allowPureNumeric = options.allowPureNumeric === true;
+  let raw = cleanText(text);
+  if (!raw) return "";
+  const looksLikeUrl = /^https?:\/\//i.test(raw) || raw.startsWith("//");
+  if (looksLikeUrl && (isPreviewUrl(raw) || isStaticAssetUrl(raw))) return "";
+
+  raw = safeDecodeURIComponent(raw)
+    .replace(/^[a-z0-9]+(?:\.[a-z0-9]+)+@/i, "")
+    .replace(/^(?:hhd800|hhb800)[_\-@.\s]?/i, "");
+
+  if (/^https?:\/\//i.test(raw)) {
+    raw = raw
+      .replace(/^https?:\/\/[^/?#]+/i, " ")
+      .replace(/[?#].*$/, " ");
+  }
+
+  const value = raw
+    .toUpperCase()
+    .replace(/\./g, " ")
+    .replace(/_/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const special = [
+    ["FC2", /\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i],
+    ["CARIB", /\bCARIB[- ]?(\d{6,8})\b/i],
+    ["1PONDO", /\b1PONDO[- ]?(\d{6,8})\b/i],
+    ["HEYZO", /\bHEYZO[- ]?(\d{3,6})\b/i],
+    ["T28", /\bT28[- ]?(\d{6,8})\b/i],
+  ];
+  for (const item of special) {
+    const match = value.match(item[1]);
+    if (match) return item[0] + "-" + match[1];
+  }
+
+  const knownMakerPattern = /\b(SONE|S2M|MIAA|SSNI|SNIS|IPX|IPZZ|SSIS|JUQ|MIDE|MIDV|STARS|ABW|RKI|DVAJ|WANZ|LULU|DLDSS|VRTM|SDMU|SDDE|MKMP|HMN|MUDR|ADN|CAWD|PPPE|PRED|MGR|SHKD|MXGS|FSDSS|JUL|KTB|MIAB|GVH|MIMK|JUY|JUTA|IDBD|HND|DASD|CLO|BF|HONB|ROE|CEMD|MIUM|NITR|RCTD|RCT|IPVR|MIBD|JUR|JURD|SOE|ORE|PYO|START|NSFS|ESD|GVG|REAL|LAF|SMD|BAD|MOND|ARSO|MOCKY|FONE|GANA|MUKO|PAPA|RASH|TAMA|ZUKO|HEY|PACO)\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_ ]?([A-Z]{1,4}))?\b/i;
+  const makerMatch = value.match(knownMakerPattern);
+  if (makerMatch) return makerMatch[1].toUpperCase() + "-" + makerMatch[2].toUpperCase() + (makerMatch[3] ? "-" + makerMatch[3].toUpperCase() : "");
+
+  const generic = value.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_ ]?([A-Z]{1,4}))?\b/i);
+  if (generic) return generic[1].toUpperCase() + "-" + generic[2].toUpperCase() + (generic[3] ? "-" + generic[3].toUpperCase() : "");
+
+  if (allowPureNumeric) {
+    const numMatch = value.match(/\b(\d{4,8})\b/);
+    if (numMatch) return numMatch[1];
+  }
+
+  return "";
+}
+
+function normalizeAggregateCodeForCompare(value) {
+  return cleanText(value).toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch (error) {
+    return String(value || "");
   }
 }
 
@@ -307,6 +637,8 @@ function toVideoItem(video = {}) {
 
 function toDetailItem(video = {}, params = {}, sources = []) {
   const item = toVideoItem(video);
+  const streamMeta = detailStreamMetadata(video, params, sources);
+  Object.assign(item, streamMeta);
   item.backdropPaths = unique([cleanImage(video.preview)].concat(video.previewImages || expandPreviewImages(video.previewImagesUrl))).filter(Boolean);
   item.genreItems = cleanTags(video.tags).map((title) => ({ id: title, title }));
   item.peoples = cleanPeople(video.actors).map((title) => ({ id: title, title, role: "actor" }));
@@ -318,8 +650,91 @@ function toDetailItem(video = {}, params = {}, sources = []) {
   item.customHeaders = firstSource && firstSource.customHeaders
     ? firstSource.customHeaders
     : mediaHeaders(params, firstSource ? (firstSource.referer || detailReferer(video.videoId, params)) : detailReferer(video.videoId, params));
-  if (firstSource) item.videoUrl = firstSource.url;
+  if (firstSource) {
+    item.videoUrl = firstSource.url;
+    item.streamUrl = firstSource.url;
+    item.playUrl = firstSource.url;
+  }
   return item;
+}
+
+function detailStreamMetadata(video = {}, params = {}, sources = []) {
+  const videoId = String(video.videoId || video._id || video.id || "").trim();
+  const title = cleanText(video.title || video.title_zh || video.title_en || video.code || videoId);
+  const code = extractStreamSearchCodeFromVideo(video, params);
+  const detailUrl = detailReferer(videoId, params);
+  const actors = cleanPeople(video.actors);
+  const tags = cleanTags(video.tags);
+  const mediaSources = detailMediaSources(sources, params, detailUrl);
+  const posterPath = cleanImage(video.preview || video.preview_hp);
+  const previewUrl = playableUrl(video.previewVideo);
+  const sourceItem = compactParams({
+    id: videoId,
+    videoId,
+    netflavVideoId: videoId,
+    code,
+    number: code,
+    title,
+    name: title,
+    originalTitle: title,
+    originalName: title,
+    link: encodeDetailLink(videoId),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath,
+    previewUrl,
+  });
+
+  return compactParams({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
+    id: videoId,
+    videoId,
+    netflavVideoId: videoId,
+    code,
+    number: code,
+    title,
+    name: title,
+    originalTitle: title,
+    originalName: title,
+    keyword: code || title,
+    searchKeyword: code || title,
+    fileName: code || title,
+    filename: code || title,
+    link: encodeDetailLink(videoId),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath,
+    previewUrl,
+    description: cleanText(video.description || ""),
+    actors,
+    tags,
+    peoples: actors.map((title) => ({ id: title, title, role: "actor" })),
+    genreItems: tags.map((title) => ({ id: title, title })),
+    sourceItem,
+    mediaSource: mediaSources[0],
+    mediaSources: mediaSources.length ? mediaSources : undefined,
+  });
+}
+
+function detailMediaSources(sources = [], params = {}, fallbackReferer = "") {
+  return (sources || []).map((source, index) => compactParams({
+    name: "Netflav " + playbackName(source.url, index, source.resolution || source.quality),
+    title: "Netflav " + playbackName(source.url, index, source.resolution || source.quality),
+    source: source.source || "Netflav",
+    quality: source.resolution || source.quality || "",
+    resolution: source.resolution || "",
+    url: source.url,
+    streamUrl: source.url,
+    playUrl: source.url,
+    videoUrl: source.url,
+    referer: source.referer || fallbackReferer,
+    customHeaders: source.customHeaders || mediaHeaders(params, source.referer || fallbackReferer),
+  })).filter((source) => source.url);
 }
 
 async function loadSpecialList(params = {}, category = "", page = 1) {
@@ -803,11 +1218,8 @@ function addAppBridge(bridges, name, owner, fn) {
 }
 
 function appModuleFallbackPayload(video = {}, params = {}) {
-  const videoId = String(video.videoId || video._id || video.id || "").trim();
-  const title = cleanText(video.title || video.title_zh || video.title_en || video.code || videoId);
-  const code = extractSupjavSearchCodeFromVideo(video, params);
-  const detailUrl = detailReferer(videoId, params);
-  return compactParams({
+  const meta = detailStreamMetadata(video, params, []);
+  return compactParams(Object.assign({}, meta, {
     provider: WidgetMetadata.id,
     sourceProvider: WidgetMetadata.id,
     currentWidgetId: WidgetMetadata.id,
@@ -815,36 +1227,7 @@ function appModuleFallbackPayload(video = {}, params = {}) {
     fallbackType: "stream",
     targetType: "stream",
     useImportedStreams: true,
-    id: videoId,
-    videoId,
-    code,
-    number: code,
-    title,
-    name: title,
-    keyword: code || title,
-    searchKeyword: code || title,
-    link: encodeDetailLink(videoId),
-    url: detailUrl,
-    detailUrl,
-    pageUrl: detailUrl,
-    posterPath: cleanImage(video.preview || video.preview_hp),
-    previewUrl: playableUrl(video.previewVideo),
-    description: cleanText(video.description || ""),
-    actors: cleanPeople(video.actors),
-    tags: cleanTags(video.tags),
-    peoples: cleanPeople(video.actors).map((title) => ({ id: title, title, role: "actor" })),
-    genreItems: cleanTags(video.tags).map((title) => ({ id: title, title })),
-    sourceItem: compactParams({
-      id: videoId,
-      videoId,
-      title,
-      code: video.code,
-      posterPath: cleanImage(video.preview || video.preview_hp),
-      previewUrl: playableUrl(video.previewVideo),
-      link: encodeDetailLink(videoId),
-      detailUrl,
-    }),
-  });
+  }));
 }
 
 function normalizeFallbackResourceCandidates(result, params = {}, referer = "") {
@@ -1202,6 +1585,30 @@ function playableUrl(url) {
   if (/^https?:\/\//i.test(value)) return value;
   if (value.startsWith("//")) return "https:" + value;
   return "";
+}
+
+function directNetflavVideoIdFromParams(params = {}, runtimeParams = {}) {
+  const linkValues = [params.link, params.detailUrl, params.pageUrl, params.url];
+  for (const value of linkValues) {
+    const videoId = decodeDirectNetflavVideoId(value, runtimeParams);
+    if (videoId) return videoId;
+  }
+  return decodeDetailLink(params.videoId || params.id);
+}
+
+function decodeDirectNetflavVideoId(value, runtimeParams = {}) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.startsWith("share:")) return "";
+  if (raw.startsWith("detail:")) return decodeDetailLink(raw);
+  if (/^https?:\/\//i.test(raw)) {
+    const baseOrigin = originFromUrl(normalizeBaseUrl(runtimeParams.baseUrl || DEFAULT_BASE_URL));
+    const rawOrigin = originFromUrl(raw);
+    if (rawOrigin !== baseOrigin && !/\/\/(?:www\.)?netflav\./i.test(raw)) return "";
+    const match = raw.match(/[?&]id=([^&#]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  }
+  if (raw.indexOf("/") >= 0 || raw.indexOf("?") >= 0 || raw.indexOf("#") >= 0) return "";
+  return raw;
 }
 
 function encodeDetailLink(videoId) {
