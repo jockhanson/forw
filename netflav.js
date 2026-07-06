@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.netflav",
   title: "Netflav",
-  version: "1.0.2",
+  version: "1.0.3",
   requiredVersion: "0.0.1",
   description: "Netflav 列表、搜索、详情与播放源模块",
   author: "Forward",
