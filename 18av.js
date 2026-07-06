@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.18av",
   title: "18AV",
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.1",
   description: "18AV 视频列表、搜索、详情与播放源模块",
   author: "Forward",
@@ -126,7 +126,11 @@ async function loadResource(params = {}) {
       baseUrl: params.baseUrl || saved.baseUrl,
       userAgent: params.userAgent || saved.userAgent,
     });
-    const href = inferDetailHref(params, runtimeParams.baseUrl);
+    let href = inferDetailHref(params, runtimeParams.baseUrl);
+    if (!href) {
+      const code = extractStreamCodeFromParams(params);
+      if (code) href = await findDetailHrefByCode(code, runtimeParams);
+    }
     if (!href) return [];
     const html = await fetchPage(href, runtimeParams);
     const sources = await collectPlayableSources(html, href, getOrigin(href) || runtimeParams.baseUrl, runtimeParams);
@@ -228,8 +232,22 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
   if (studio) descriptionParts.push("Studio: " + studio);
   if (genreItems.length) descriptionParts.push("Genre: " + genreItems.map((item) => item.title).join(", "));
 
-  return {
-    id: stableId(href),
+  const sourceItems = sources.map((source, index) => streamMediaSource(source, index, params, href));
+  const streamMeta = detailStreamMetadata({
+    href,
+    title: title || code || stableId(href),
+    code,
+    poster,
+    previewUrl: poster,
+    durationText,
+    releaseDate,
+    description: descriptionParts.join("\n"),
+    genreItems,
+    peoples,
+    mediaSources: sourceItems,
+  });
+
+  return Object.assign({
     type: "url",
     mediaType: "movie",
     title: title || code || stableId(href),
@@ -248,7 +266,103 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     peoples,
     relatedItems,
     trailers: sources[0] ? [{ coverUrl: poster, url: sources[0].url }] : [],
-  };
+  }, streamMeta);
+}
+
+async function findDetailHrefByCode(code, params = {}) {
+  const keys = aggregateSearchKeys(code);
+  for (const key of keys) {
+    try {
+      const url = `${params.baseUrl}/${DEFAULT_LANG}/fc_search/all/${encodePathSegment(key)}/1.html`;
+      const html = await fetchPage(url, params);
+      const items = parseVideoList(html, params.baseUrl);
+      const matched = items.find((item) => itemMatchesStreamCode(item, code));
+      if (matched && matched.link) return normalize18AvUrl(decodeDetailLink(matched.link), params.baseUrl);
+    } catch (error) {
+      console.log("[18av][aggregate] 搜索失败:", key, error.message || error);
+    }
+  }
+  return "";
+}
+
+function detailStreamMetadata(info = {}) {
+  const code = normalizeStreamCode(info.code || extractStreamCode(info.title));
+  const providerId = stableId(info.href || info.title || code);
+  const publicId = code || providerId;
+  const detailUrl = info.href || "";
+  const mediaSources = (info.mediaSources || []).filter((item) => item && item.url);
+  const sourceItem = compactObject({
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    providerDetailUrl: detailUrl,
+    code,
+    number: code,
+    javCode: code,
+    title: info.title,
+    name: info.title,
+    originalTitle: info.title,
+    originalName: info.title,
+    fileName: code || info.title,
+    filename: code || info.title,
+    link: encodeDetailLink(detailUrl),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: info.poster,
+    previewUrl: info.previewUrl,
+  });
+  return compactObject({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    providerDetailUrl: detailUrl,
+    code,
+    number: code,
+    javCode: code,
+    title: info.title,
+    name: info.title,
+    originalTitle: info.title,
+    originalName: info.title,
+    keyword: code || info.title,
+    searchKeyword: code || info.title,
+    fileName: code || info.title,
+    filename: code || info.title,
+    link: encodeDetailLink(detailUrl),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: info.poster,
+    previewUrl: info.previewUrl,
+    durationText: info.durationText,
+    releaseDate: info.releaseDate,
+    description: info.description,
+    genreItems: info.genreItems,
+    peoples: info.peoples,
+    actors: (info.peoples || []).map((item) => item.title).filter(Boolean),
+    tags: (info.genreItems || []).map((item) => item.title).filter(Boolean),
+    mediaSource: mediaSources[0],
+    mediaSources: mediaSources.length ? mediaSources : undefined,
+    sourceItem,
+  });
+}
+
+function streamMediaSource(source = {}, index, params = {}, href = "") {
+  return compactObject({
+    name: source.name || playbackName(source.url, index),
+    title: source.name || playbackName(source.url, index),
+    source: source.source || "18AV",
+    url: source.url,
+    streamUrl: source.url,
+    playUrl: source.url,
+    videoUrl: source.url,
+    referer: source.referer || href,
+    customHeaders: mediaHeaders(params, source.referer || href),
+  });
 }
 
 async function collectPlayableSources(html, referer, baseUrl, params = {}) {
@@ -700,7 +814,25 @@ function pagedAbsoluteUrl(url, page, baseUrl) {
 }
 
 function inferDetailHref(params = {}, baseUrl) {
-  return normalize18AvUrl(decodeDetailLink(params.link || params.detailLink || params.href || params.url || params.id || params.videoUrl), baseUrl);
+  const values = [
+    params.link,
+    params.detailLink,
+    params.href,
+    params.pageUrl,
+    params.detailUrl,
+    params.url,
+    params.sourceItem && params.sourceItem.link,
+    params.sourceItem && params.sourceItem.detailUrl,
+  ];
+  for (const value of values) {
+    const href = normalize18AvUrl(decodeDetailLink(value), baseUrl);
+    if (is18AvDetailUrl(href)) return href;
+  }
+  return "";
+}
+
+function is18AvDetailUrl(url) {
+  return /^https?:\/\/[^/]+\/[^?#]+_content\/[^?#]+\.html(?:[?#].*)?$/i.test(String(url || ""));
 }
 
 function encodeDetailLink(href) {
@@ -917,6 +1049,142 @@ function unique(list) {
     out.push(item);
   }
   return out;
+}
+
+function compactObject(value) {
+  const out = {};
+  for (const key in value || {}) {
+    const item = value[key];
+    if (item === undefined || item === null || item === "") continue;
+    if (Array.isArray(item) && !item.length) continue;
+    out[key] = item;
+  }
+  return out;
+}
+
+function aggregateSearchKeys(code) {
+  const value = normalizeStreamCode(code);
+  const compact = compareStreamCode(value);
+  const keys = [value, value.replace(/-/g, ""), compact];
+  return unique(keys).filter(Boolean);
+}
+
+function itemMatchesStreamCode(item = {}, code = "") {
+  const target = compareStreamCode(code);
+  if (!target) return false;
+  const candidates = [item.code, item.number, item.id, item.videoId, item.title, item.name, item.description, item.link];
+  for (const value of candidates) {
+    const found = extractStreamCode(value);
+    if (compareStreamCode(found) === target) return true;
+  }
+  return false;
+}
+
+function extractStreamCodeFromParams(params = {}) {
+  const candidates = [
+    params.code,
+    params.number,
+    params.javCode,
+    params.videoId,
+    params.id,
+    params.title,
+    params.name,
+    params.originalTitle,
+    params.originalName,
+    params.fileName,
+    params.filename,
+    params.description,
+    params.link,
+    params.url,
+    params.detailUrl,
+    params.pageUrl,
+  ];
+  appendNestedStreamCandidates(candidates, params.sourceItem);
+  appendNestedStreamCandidates(candidates, params.info);
+  appendNestedStreamCandidates(candidates, params.mediaSource);
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) appendNestedStreamCandidates(candidates, source);
+  }
+  for (const value of candidates) {
+    const code = extractStreamCode(value);
+    if (code) return code;
+  }
+  for (const value of collectStringValues(params)) {
+    const code = extractStreamCode(value, { allowPureNumeric: false });
+    if (code) return code;
+  }
+  return "";
+}
+
+function appendNestedStreamCandidates(out, value = {}) {
+  if (!value || typeof value !== "object") return;
+  out.push(value.code, value.number, value.javCode, value.videoId, value.id, value.title, value.name, value.fileName, value.filename, value.link, value.url, value.detailUrl, value.pageUrl, value.description);
+}
+
+function collectStringValues(value, depth = 0, out = [], visited = []) {
+  if (value === null || value === undefined || depth > 5) return out;
+  const type = typeof value;
+  if (type === "string" || type === "number") {
+    const text = String(value).trim();
+    if (text) out.push(text);
+    return out;
+  }
+  if (type !== "object") return out;
+  for (const item of visited) {
+    if (item === value) return out;
+  }
+  visited.push(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringValues(item, depth + 1, out, visited);
+    return out;
+  }
+  for (const key in value) collectStringValues(value[key], depth + 1, out, visited);
+  return out;
+}
+
+function extractStreamCode(value, options = {}) {
+  const allowPureNumeric = options.allowPureNumeric === true;
+  let text = cleanText(value);
+  if (!text) return "";
+  text = safeDecodeURIComponent(text)
+    .replace(/^[a-z0-9]+(?:\.[a-z0-9]+)+@/i, "")
+    .replace(/^(?:hhd800|hhb800)[_\-@.\s]?/i, "");
+  if (/^https?:\/\//i.test(text)) text = text.replace(/^https?:\/\/[^/?#]+/i, " ").replace(/[?#].*$/, " ");
+  text = text.toUpperCase().replace(/\./g, " ").replace(/_/g, "-").replace(/\s+/g, " ").trim();
+  const special = [
+    ["FC2", /\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i],
+    ["CARIB", /\bCARIB[- ]?(\d{6,8})\b/i],
+    ["1PONDO", /\b1PONDO[- ]?(\d{6,8})\b/i],
+    ["HEYZO", /\bHEYZO[- ]?(\d{3,6})\b/i],
+    ["T28", /\bT28[- ]?(\d{6,8})\b/i],
+  ];
+  for (const item of special) {
+    const match = text.match(item[1]);
+    if (match) return item[0] + "-" + match[1];
+  }
+  const known = text.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_ ]?([A-Z]{1,4}))?\b/i);
+  if (known) return known[1].toUpperCase() + "-" + known[2].toUpperCase() + (known[3] ? "-" + known[3].toUpperCase() : "");
+  if (allowPureNumeric) {
+    const num = text.match(/\b(\d{4,8})\b/);
+    if (num) return num[1];
+  }
+  return "";
+}
+
+function normalizeStreamCode(value) {
+  return extractStreamCode(value) || cleanText(value).toUpperCase().replace(/[_\s]+/g, "-");
+}
+
+function compareStreamCode(value) {
+  return normalizeStreamCode(value).toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch (error) {
+    return String(value || "");
+  }
 }
 
 function mediaScore(url) {

@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.av01",
   title: "AV01",
-  version: "1.0.1",
+  version: "1.0.2",
   requiredVersion: "0.0.1",
   description: "AV01 列表、搜索、详情与播放源模块",
   author: "Forward",
@@ -217,7 +217,11 @@ async function loadResource(params = {}) {
       }];
     }
 
-    const videoId = inferVideoId(params);
+    let videoId = inferVideoId(params);
+    if (!videoId) {
+      const code = extractStreamCodeFromParams(params);
+      if (code) videoId = await findVideoIdByCode(code, runtimeParams);
+    }
     if (!videoId) return [];
     const geo = await getGeo(runtimeParams);
     const cdnAccess = await apiGet(`videos/${encodePath(videoId)}/cdn-access`, runtimeParams, {
@@ -366,6 +370,7 @@ async function loadEntityDetail(route) {
 
 function toDetailItem(video = {}, params = {}, geo, relatedItems = []) {
   const item = toVideoItem(video, params, geo);
+  Object.assign(item, detailStreamMetadata(video, params, geo));
   const poster = item.posterPath || item.backdropPath || "";
   item.backdropPaths = unique([poster]).filter(Boolean);
   item.genreItems = genreItems(video, params);
@@ -374,6 +379,84 @@ function toDetailItem(video = {}, params = {}, geo, relatedItems = []) {
   item.trailers = item.previewUrl ? [{ coverUrl: poster, url: item.previewUrl }] : [];
   item.description = detailDescription(video, params);
   return item;
+}
+
+async function findVideoIdByCode(code, params = {}) {
+  try {
+    const body = {
+      query: code,
+      pagination: { page: 1, limit: PAGE_LIMIT },
+    };
+    const data = await apiPost("videos/search", body, params, { lang: params.lang });
+    const videos = listFromResponse(data);
+    const matched = videos.find((video) => videoMatchesStreamCode(video, code));
+    return matched ? String(matched.id || matched.video_id || "") : "";
+  } catch (error) {
+    console.log("[av01][aggregate] 搜索失败:", code, error.message || error);
+    return "";
+  }
+}
+
+function detailStreamMetadata(video = {}, params = {}, geo) {
+  const providerId = String(video.id || video.video_id || "");
+  const title = videoTitle(video, params);
+  const code = normalizeStreamCode(video.dvd_id || video.dmm_id || extractStreamCode(title));
+  const publicId = code || providerId;
+  const detailUrl = detailReferer(providerId, params);
+  const poster = coverUrl(video, geo);
+  const preview = previewUrl(video, geo);
+  const sourceItem = compactObject({
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    av01VideoId: providerId,
+    code,
+    number: code,
+    javCode: code,
+    title,
+    name: title,
+    originalTitle: title,
+    originalName: title,
+    fileName: code || title,
+    filename: code || title,
+    link: encodeDetailLink(providerId),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: poster,
+    previewUrl: preview,
+  });
+  return compactObject({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    av01VideoId: providerId,
+    code,
+    number: code,
+    javCode: code,
+    title,
+    name: title,
+    originalTitle: title,
+    originalName: title,
+    keyword: code || title,
+    searchKeyword: code || title,
+    fileName: code || title,
+    filename: code || title,
+    link: encodeDetailLink(providerId),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: poster,
+    previewUrl: preview,
+    description: detailDescription(video, params),
+    actors: peopleItems(video, params, geo).map((item) => item.title).filter(Boolean),
+    tags: genreItems(video, params).map((item) => item.title).filter(Boolean),
+    sourceItem,
+  });
 }
 
 function toVideoItem(video = {}, params = {}, geo) {
@@ -581,7 +664,20 @@ function parseRoute(value, fallbackType) {
 }
 
 function inferVideoId(params = {}) {
-  const candidates = [params.videoId, params.id, params.link, params.url, params.href];
+  const candidates = [
+    params.av01VideoId,
+    params.providerVideoId,
+    params.sourceItem && params.sourceItem.av01VideoId,
+    params.sourceItem && params.sourceItem.providerVideoId,
+    params.sourceItem && params.sourceItem.link,
+    params.videoId,
+    params.id,
+    params.link,
+    params.detailUrl,
+    params.pageUrl,
+    params.url,
+    params.href,
+  ];
   for (const candidate of candidates) {
     const id = decodeDetailLink(candidate);
     if (id && !isPlayableUrl(id)) return id;
@@ -593,7 +689,7 @@ function directPlayableParam(params = {}) {
   const candidates = [params.videoUrl, params.url, params.src, params.file];
   for (const candidate of candidates) {
     const url = String(candidate || "").trim();
-    if (isPlayableUrl(url)) return url;
+    if (isDirectPlayableUrl(url)) return url;
   }
   return "";
 }
@@ -758,6 +854,12 @@ function decodeBase64(input) {
 function isPlayableUrl(url) {
   const value = String(url || "").trim();
   return /^https?:\/\//i.test(value) || /^data:application\/(?:x-mpegurl|vnd\.apple\.mpegurl)/i.test(value);
+}
+
+function isDirectPlayableUrl(url) {
+  const value = String(url || "").trim();
+  return /^data:application\/(?:x-mpegurl|vnd\.apple\.mpegurl)/i.test(value) ||
+    /\.(?:m3u8|mp4|webm)(?:[?#]|$)/i.test(value);
 }
 
 function sourceDescription(source = {}, index) {
@@ -958,4 +1060,142 @@ function uniqueObjects(list, keyName) {
     out.push(item);
   }
   return out;
+}
+
+function compactObject(value) {
+  const out = {};
+  for (const key in value || {}) {
+    const item = value[key];
+    if (item === undefined || item === null || item === "") continue;
+    if (Array.isArray(item) && !item.length) continue;
+    out[key] = item;
+  }
+  return out;
+}
+
+function videoMatchesStreamCode(video = {}, code = "") {
+  const target = compareStreamCode(code);
+  if (!target) return false;
+  const candidates = [
+    video.dvd_id,
+    video.dmm_id,
+    video.id,
+    video.video_id,
+    video.title,
+    video.name,
+    translatedValue(video.title, video.title_translations, {}),
+    translatedValue(video.description, video.description_translations, {}),
+  ];
+  for (const value of candidates) {
+    const found = extractStreamCode(value);
+    if (compareStreamCode(found) === target) return true;
+  }
+  return false;
+}
+
+function extractStreamCodeFromParams(params = {}) {
+  const candidates = [
+    params.code,
+    params.number,
+    params.javCode,
+    params.videoId,
+    params.id,
+    params.title,
+    params.name,
+    params.originalTitle,
+    params.originalName,
+    params.fileName,
+    params.filename,
+    params.description,
+    params.link,
+    params.url,
+    params.detailUrl,
+    params.pageUrl,
+  ];
+  appendNestedStreamCandidates(candidates, params.sourceItem);
+  appendNestedStreamCandidates(candidates, params.info);
+  appendNestedStreamCandidates(candidates, params.mediaSource);
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) appendNestedStreamCandidates(candidates, source);
+  }
+  for (const value of candidates) {
+    const code = extractStreamCode(value);
+    if (code) return code;
+  }
+  for (const value of collectStringValues(params)) {
+    const code = extractStreamCode(value, { allowPureNumeric: false });
+    if (code) return code;
+  }
+  return "";
+}
+
+function appendNestedStreamCandidates(out, value = {}) {
+  if (!value || typeof value !== "object") return;
+  out.push(value.code, value.number, value.javCode, value.videoId, value.id, value.title, value.name, value.fileName, value.filename, value.link, value.url, value.detailUrl, value.pageUrl, value.description);
+}
+
+function collectStringValues(value, depth = 0, out = [], visited = []) {
+  if (value === null || value === undefined || depth > 5) return out;
+  const type = typeof value;
+  if (type === "string" || type === "number") {
+    const text = String(value).trim();
+    if (text) out.push(text);
+    return out;
+  }
+  if (type !== "object") return out;
+  for (const item of visited) {
+    if (item === value) return out;
+  }
+  visited.push(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringValues(item, depth + 1, out, visited);
+    return out;
+  }
+  for (const key in value) collectStringValues(value[key], depth + 1, out, visited);
+  return out;
+}
+
+function extractStreamCode(value, options = {}) {
+  const allowPureNumeric = options.allowPureNumeric === true;
+  let text = cleanText(value);
+  if (!text) return "";
+  text = safeDecodeURIComponent(text)
+    .replace(/^[a-z0-9]+(?:\.[a-z0-9]+)+@/i, "")
+    .replace(/^(?:hhd800|hhb800)[_\-@.\s]?/i, "");
+  if (/^https?:\/\//i.test(text)) text = text.replace(/^https?:\/\/[^/?#]+/i, " ").replace(/[?#].*$/, " ");
+  text = text.toUpperCase().replace(/\./g, " ").replace(/_/g, "-").replace(/\s+/g, " ").trim();
+  const special = [
+    ["FC2", /\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i],
+    ["CARIB", /\bCARIB[- ]?(\d{6,8})\b/i],
+    ["1PONDO", /\b1PONDO[- ]?(\d{6,8})\b/i],
+    ["HEYZO", /\bHEYZO[- ]?(\d{3,6})\b/i],
+    ["T28", /\bT28[- ]?(\d{6,8})\b/i],
+  ];
+  for (const item of special) {
+    const match = text.match(item[1]);
+    if (match) return item[0] + "-" + match[1];
+  }
+  const generic = text.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_ ]?([A-Z]{1,4}))?\b/i);
+  if (generic) return generic[1].toUpperCase() + "-" + generic[2].toUpperCase() + (generic[3] ? "-" + generic[3].toUpperCase() : "");
+  if (allowPureNumeric) {
+    const num = text.match(/\b(\d{4,8})\b/);
+    if (num) return num[1];
+  }
+  return "";
+}
+
+function normalizeStreamCode(value) {
+  return extractStreamCode(value) || cleanText(value).toUpperCase().replace(/[_\s]+/g, "-");
+}
+
+function compareStreamCode(value) {
+  return normalizeStreamCode(value).toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch (error) {
+    return String(value || "");
+  }
 }

@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.bestjavporn",
   title: "BestJavPorn",
-  version: "1.0.13",
+  version: "1.0.14",
   requiredVersion: "0.0.1",
   description: "BestJavPorn 列表、搜索与详情模块",
   author: "Forward",
@@ -139,7 +139,11 @@ async function loadResource(params = {}) {
       cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
       userAgent: String(params.userAgent || saved.userAgent || "").trim(),
     };
-    const href = inferDetailHref(params, runtimeParams.baseUrl);
+    let href = inferDetailHref(params, runtimeParams.baseUrl);
+    if (!href) {
+      const code = extractStreamCodeFromParams(params);
+      if (code) href = await findDetailHrefByCode(code, runtimeParams);
+    }
     if (!href) return [];
 
     const baseUrl = getBaseUrlFromLink(href);
@@ -297,9 +301,21 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     role: "actor",
   }));
   const relatedItems = parseRelatedItems(html, baseUrl, href);
+  const sources = videoUrl ? [{ url: videoUrl, source: "BestJavPorn" }] : [];
+  const sourceItems = sources.map((source, index) => streamMediaSource(source, index, params, href));
+  const streamMeta = detailStreamMetadata({
+    href,
+    title: title || stableId(href),
+    code: extractStreamCode(title || description),
+    poster,
+    previewUrl: poster,
+    description,
+    genreItems: genres,
+    peoples,
+    mediaSources: sourceItems,
+  });
 
-  return {
-    id: stableId(href),
+  return Object.assign({
     type: "detail",
     title: title || stableId(href),
     posterPath: poster,
@@ -314,7 +330,101 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     genreItems: genres,
     peoples,
     relatedItems,
-  };
+  }, streamMeta);
+}
+
+async function findDetailHrefByCode(code, params = {}) {
+  const keys = aggregateSearchKeys(code);
+  for (const key of keys) {
+    try {
+      const pagePath = "/";
+      const html = await fetchPage(`${params.baseUrl}${pagePath}?s=${encodeURIComponent(key)}`, params);
+      const items = parseVideoList(html, params.baseUrl);
+      const matched = items.find((item) => itemMatchesStreamCode(item, code));
+      if (matched && matched.link) return normalizeBestJavPornUrl(decodeDetailLink(matched.link), params.baseUrl);
+    } catch (error) {
+      console.log("[bestjavporn][aggregate] 搜索失败:", key, error.message || error);
+    }
+  }
+  return "";
+}
+
+function detailStreamMetadata(info = {}) {
+  const code = normalizeStreamCode(info.code || extractStreamCode(info.title));
+  const providerId = stableId(info.href || info.title || code);
+  const publicId = code || providerId;
+  const detailUrl = info.href || "";
+  const mediaSources = (info.mediaSources || []).filter((item) => item && item.url);
+  const sourceItem = compactObject({
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    providerDetailUrl: detailUrl,
+    code,
+    number: code,
+    javCode: code,
+    title: info.title,
+    name: info.title,
+    originalTitle: info.title,
+    originalName: info.title,
+    fileName: code || info.title,
+    filename: code || info.title,
+    link: encodeDetailLink(detailUrl),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: info.poster,
+    previewUrl: info.previewUrl,
+  });
+  return compactObject({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    providerDetailUrl: detailUrl,
+    code,
+    number: code,
+    javCode: code,
+    title: info.title,
+    name: info.title,
+    originalTitle: info.title,
+    originalName: info.title,
+    keyword: code || info.title,
+    searchKeyword: code || info.title,
+    fileName: code || info.title,
+    filename: code || info.title,
+    link: encodeDetailLink(detailUrl),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: info.poster,
+    previewUrl: info.previewUrl,
+    description: info.description,
+    genreItems: info.genreItems,
+    peoples: info.peoples,
+    actors: (info.peoples || []).map((item) => item.title).filter(Boolean),
+    tags: (info.genreItems || []).map((item) => item.title).filter(Boolean),
+    mediaSource: mediaSources[0],
+    mediaSources: mediaSources.length ? mediaSources : undefined,
+    sourceItem,
+  });
+}
+
+function streamMediaSource(source = {}, index, params = {}, href = "") {
+  return compactObject({
+    name: playbackName(source.url, index),
+    title: playbackName(source.url, index),
+    source: source.source || "BestJavPorn",
+    url: source.url,
+    streamUrl: source.url,
+    playUrl: source.url,
+    videoUrl: source.url,
+    referer: href,
+    customHeaders: mediaHeaders(params, href),
+  });
 }
 
 function parseRelatedItems(html, baseUrl, currentHref) {
@@ -366,6 +476,7 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   }
 
   const directMedia = candidates.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
+  console.log("[bestjavporn][candidates] 直接视频 URL 数:", directMedia.length);
   if (directMedia.length === 0) {
     console.log("[bestjavporn][candidates] 未发现直接视频 URL，尝试从脚本/JSON 提取...");
     const scriptMedia = await extractVideoFromScripts(html, referer, baseUrl, params);
@@ -373,11 +484,20 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
     console.log("[bestjavporn][candidates] script-probe 新增:", scriptMedia.length);
   }
 
-  if (candidates.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url)).length === 0) {
+  const directMedia2 = candidates.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
+  if (directMedia2.length === 0) {
     console.log("[bestjavporn][candidates] 仍未发现直接视频 URL，尝试从播放器 API 提取...");
     const apiCandidates = await probePlayerApis(html, referer, baseUrl, params);
     apiCandidates.forEach((url) => candidates.push({ url, source: "api-probe" }));
     console.log("[bestjavporn][candidates] api-probe 新增:", apiCandidates.length);
+  }
+
+  const directMedia3 = candidates.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
+  if (directMedia3.length === 0) {
+    console.log("[bestjavporn][candidates] 尝试从 iframe 页面深度提取...");
+    const deepCandidates = await deepProbeIframes(html, referer, baseUrl, params);
+    deepCandidates.forEach((url) => candidates.push({ url, source: "deep-iframe" }));
+    console.log("[bestjavporn][candidates] deep-iframe 新增:", deepCandidates.length);
   }
 
   const deduped = uniqueCandidates(candidates);
@@ -390,7 +510,55 @@ async function collectPlayableCandidates(html, referer, baseUrl, params = {}) {
   const result = uniqueCandidates(expanded).sort((a, b) => mediaScore(b.url) - mediaScore(a.url));
   console.log("[bestjavporn][candidates] 最终:", result.length);
   result.forEach((r, i) => console.log("[bestjavporn][candidates]   结果#" + i, r.url));
+
+  if (result.length > 1) {
+    for (let i = 0; i < Math.min(result.length, 3); i++) {
+      const url = result[i].url;
+      if (/\.mp4(?:[?#]|$)/i.test(url)) {
+        const isFull = await isLikelyFullVideo(url, referer, params);
+        if (!isFull) {
+          console.log("[bestjavporn][candidates] 跳过疑似预览:", url);
+          result.splice(i, 1);
+          i--;
+        }
+      }
+    }
+  }
+
+  console.log("[bestjavporn][candidates] 过滤后最终:", result.length);
+  result.forEach((r, i) => console.log("[bestjavporn][candidates]   最终#" + i, r.url));
   return result;
+}
+
+async function deepProbeIframes(html, referer, baseUrl, params) {
+  const found = [];
+  const allIframes = extractIframeUrls(html, baseUrl);
+  console.log("[bestjavporn][deep-iframe] 所有 iframe:", allIframes.length);
+  allIframes.forEach((u, i) => console.log("[bestjavporn][deep-iframe]   #" + i, u));
+
+  for (const iframeUrl of allIframes) {
+    try {
+      const iframeHtml = await fetchPageWithReferer(iframeUrl, params, referer);
+      const mediaUrls = extractMediaCandidates(iframeHtml, iframeUrl);
+      const directUrls = mediaUrls.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
+      directUrls.forEach((c) => found.push(c.url));
+      console.log("[bestjavporn][deep-iframe]   ", iframeUrl, "直接视频:", directUrls.length);
+
+      const nestedIframes = extractIframeUrls(iframeHtml, iframeUrl);
+      for (const nestedUrl of nestedIframes) {
+        try {
+          const nestedHtml = await fetchPageWithReferer(nestedUrl, params, iframeUrl);
+          const nestedMedia = extractMediaCandidates(nestedHtml, nestedUrl);
+          const nestedDirect = nestedMedia.filter((c) => /\.(?:mp4|m3u8|webm)(?:[?#]|$)/i.test(c.url) && !isPreviewUrl(c.url));
+          nestedDirect.forEach((c) => found.push(c.url));
+          console.log("[bestjavporn][deep-iframe]     嵌套:", nestedUrl, "直接视频:", nestedDirect.length);
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.log("[bestjavporn][deep-iframe]   失败:", iframeUrl, (e && e.message) || e);
+    }
+  }
+  return unique(found);
 }
 
 async function probePlayerApis(html, referer, baseUrl, params) {
@@ -426,6 +594,7 @@ async function probePlayerApis(html, referer, baseUrl, params) {
   const videoIds = new Set();
   let m;
   while ((m = videoIdRe.exec(html))) videoIds.add(m[2]);
+  console.log("[bestjavporn][api-probe] 视频 ID 候选:", [...videoIds].join(", "));
   const apiEndpoints = [
     "/wp-admin/admin-ajax.php",
     "/api/video",
@@ -435,6 +604,7 @@ async function probePlayerApis(html, referer, baseUrl, params) {
     "/video/watch",
     "/player/api",
     "/embed/api",
+    "/wp-json/wp/v2/posts",
   ];
   const base = normalizeBaseUrl(baseUrl);
   for (const id of videoIds) {
@@ -538,13 +708,15 @@ function extractMediaCandidates(html, baseUrl) {
   collectMediaMatches(candidates, searchable, /<(?:source|video)\b[^>]*src=(["'])(.*?)\1/gi, baseUrl, "source", 2);
   collectMediaMatches(candidates, searchable, /<meta\b[^>]*(?:property|name)=(["'])(?:og:video|og:video:url|twitter:player:stream|video)\1[^>]*content=(["'])(.*?)\2/gi, baseUrl, "meta", 3);
   collectMediaMatches(candidates, searchable, /\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|data-source|data-stream|file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "script", 2);
-  collectMediaMatches(candidates, searchable, /<(?:video|source|audio|track|embed|object|iframe)\b[^>]*\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|data-source|data-stream|data-full|data-main|data-original|src|poster|href|data)=(["'])([^"']+)\1/gi, baseUrl, "data-attr", 2);
+  collectMediaMatches(candidates, searchable, /<(?:video|source|audio|track|embed|object|iframe)\b[^>]*\b(?:data-src|data-video|data-file|data-url|data-hls|data-mp4|data-source|data-stream|data-full|data-main|data-original|data-hls-url|data-video-url|src|poster|href|data)=(["'])([^"']+)\1/gi, baseUrl, "data-attr", 2);
   collectMediaMatches(candidates, searchable, /\bstyle\s*=\s*(["'])[^"']*url\s*\(\s*\\?\s*'(https?:\/\/[^']+\.(?:mp4|m3u8|webm)[^']*)\\?\s*\)/gi, baseUrl, "css-url", 2);
   collectMediaMatches(candidates, searchable, /\b(?:file|src|url|source|hls|video|video_url|videoUrl)\s*[:=]\s*([^"',}\]\s<>]+)/gi, baseUrl, "script", 1);
   collectMediaMatches(candidates, searchable, /\b(?:full_video|fullVideo|full_video_url|fullVideoUrl|main_video|mainVideo|movie_url|movieUrl|content_url|contentUrl|media_url|mediaUrl|play_url|playUrl)\s*[:=]\s*(["'])([^"']+)\1/gi, baseUrl, "full-video", 2);
   collectMediaMatches(candidates, searchable, /\b(?:full_video|fullVideo|full_video_url|fullVideoUrl|main_video|mainVideo|movie_url|movieUrl|content_url|contentUrl|media_url|mediaUrl|play_url|playUrl)\s*[:=]\s*([^"',}\]\s<>]+)/gi, baseUrl, "full-video", 1);
   collectMediaMatches(candidates, searchable, /(?:loadVideo|loadSource|setSource|changeSource|switchSource|playVideo)\s*\(\s*(["'])([^"']+)\1/gi, baseUrl, "js-func", 2);
+  collectMediaMatches(candidates, searchable, /(?:fetch|axios|ajax|XMLHttpRequest)\s*\(\s*(["'])([^"']+)\1/gi, baseUrl, "ajax-call", 2);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\.(?:m3u8|mp4|webm)(?:\?[^"'<>\s\\]*)?)/gi, baseUrl, "url", 1);
+  collectMediaMatches(candidates, searchable, /`([^`]*\.(?:m3u8|mp4|webm)[^`]*)`/gi, baseUrl, "template-literal", 1);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/(?:get_file|dl|download|stream|video|media|hls|playlist|master|embed|player|v\.php|source|file|watch|view|play)[^"'<>\s\\]*)/gi, baseUrl, "url", 1);
   collectMediaMatches(candidates, searchable, /<a\b[^>]*\bhref=(["'])([^"']*(?:download|watch|play|stream|video|source|file)[^"']*)["'][^>]*>/gi, baseUrl, "download-link", 2);
   collectMediaMatches(candidates, searchable, /(https?:\/\/[^"'<>\s\\]+\/wp-admin\/admin-ajax\.php\?[^"'<>\s\\]+)/gi, baseUrl, "ajax", 1);
@@ -702,6 +874,29 @@ async function probeUrl(url, referer, params, usePost = false) {
     return String((res && res.data) || "");
   } catch (e) {
     return "";
+  }
+}
+
+async function isLikelyFullVideo(url, referer, params) {
+  try {
+    const headers = buildHeaders(params, referer);
+    const res = await Widget.http.head(url, { headers });
+    const contentLength = Number((res && res.headers && (res.headers["content-length"] || res.headers["Content-Length"])) || 0);
+    const contentType = String((res && res.headers && (res.headers["content-type"] || res.headers["Content-Type"])) || "");
+    console.log("[bestjavporn][probe] HEAD", url, "size:", contentLength, "type:", contentType);
+    if (contentLength > 5 * 1024 * 1024) return true;
+    if (contentLength > 0 && contentLength < 500 * 1024) return false;
+    if (/\.m3u8(?:[?#]|$)/i.test(url)) {
+      const m3u8Res = await Widget.http.get(url, { headers });
+      const body = String((m3u8Res && m3u8Res.data) || "");
+      const durationMatch = body.match(/#EXT-X-TARGETDURATION:\s*(\d+)/i);
+      if (durationMatch && Number(durationMatch[1]) < 15) return false;
+      const totalDuration = body.match(/#EXT-X-TOTALDURATION:\s*(\d+)/i);
+      if (totalDuration && Number(totalDuration[1]) < 15) return false;
+    }
+    return true;
+  } catch (e) {
+    return true;
   }
 }
 
@@ -980,6 +1175,142 @@ function unique(values) {
   });
 }
 
+function compactObject(value) {
+  const out = {};
+  for (const key in value || {}) {
+    const item = value[key];
+    if (item === undefined || item === null || item === "") continue;
+    if (Array.isArray(item) && !item.length) continue;
+    out[key] = item;
+  }
+  return out;
+}
+
+function aggregateSearchKeys(code) {
+  const value = normalizeStreamCode(code);
+  const compact = compareStreamCode(value);
+  const keys = [value, value.replace(/-/g, ""), compact];
+  return unique(keys).filter(Boolean);
+}
+
+function itemMatchesStreamCode(item = {}, code = "") {
+  const target = compareStreamCode(code);
+  if (!target) return false;
+  const candidates = [item.code, item.number, item.id, item.videoId, item.title, item.name, item.description, item.link];
+  for (const value of candidates) {
+    const found = extractStreamCode(value);
+    if (compareStreamCode(found) === target) return true;
+  }
+  return false;
+}
+
+function extractStreamCodeFromParams(params = {}) {
+  const candidates = [
+    params.code,
+    params.number,
+    params.javCode,
+    params.videoId,
+    params.id,
+    params.title,
+    params.name,
+    params.originalTitle,
+    params.originalName,
+    params.fileName,
+    params.filename,
+    params.description,
+    params.link,
+    params.url,
+    params.detailUrl,
+    params.pageUrl,
+  ];
+  appendNestedStreamCandidates(candidates, params.sourceItem);
+  appendNestedStreamCandidates(candidates, params.info);
+  appendNestedStreamCandidates(candidates, params.mediaSource);
+  if (Array.isArray(params.mediaSources)) {
+    for (const source of params.mediaSources) appendNestedStreamCandidates(candidates, source);
+  }
+  for (const value of candidates) {
+    const code = extractStreamCode(value);
+    if (code) return code;
+  }
+  for (const value of collectStringValues(params)) {
+    const code = extractStreamCode(value, { allowPureNumeric: false });
+    if (code) return code;
+  }
+  return "";
+}
+
+function appendNestedStreamCandidates(out, value = {}) {
+  if (!value || typeof value !== "object") return;
+  out.push(value.code, value.number, value.javCode, value.videoId, value.id, value.title, value.name, value.fileName, value.filename, value.link, value.url, value.detailUrl, value.pageUrl, value.description);
+}
+
+function collectStringValues(value, depth = 0, out = [], visited = []) {
+  if (value === null || value === undefined || depth > 5) return out;
+  const type = typeof value;
+  if (type === "string" || type === "number") {
+    const text = String(value).trim();
+    if (text) out.push(text);
+    return out;
+  }
+  if (type !== "object") return out;
+  for (const item of visited) {
+    if (item === value) return out;
+  }
+  visited.push(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringValues(item, depth + 1, out, visited);
+    return out;
+  }
+  for (const key in value) collectStringValues(value[key], depth + 1, out, visited);
+  return out;
+}
+
+function extractStreamCode(value, options = {}) {
+  const allowPureNumeric = options.allowPureNumeric === true;
+  let text = cleanText(value);
+  if (!text) return "";
+  text = safeDecodeURIComponent(text)
+    .replace(/^[a-z0-9]+(?:\.[a-z0-9]+)+@/i, "")
+    .replace(/^(?:hhd800|hhb800)[_\-@.\s]?/i, "");
+  if (/^https?:\/\//i.test(text)) text = text.replace(/^https?:\/\/[^/?#]+/i, " ").replace(/[?#].*$/, " ");
+  text = text.toUpperCase().replace(/\./g, " ").replace(/_/g, "-").replace(/\s+/g, " ").trim();
+  const special = [
+    ["FC2", /\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i],
+    ["CARIB", /\bCARIB[- ]?(\d{6,8})\b/i],
+    ["1PONDO", /\b1PONDO[- ]?(\d{6,8})\b/i],
+    ["HEYZO", /\bHEYZO[- ]?(\d{3,6})\b/i],
+    ["T28", /\bT28[- ]?(\d{6,8})\b/i],
+  ];
+  for (const item of special) {
+    const match = text.match(item[1]);
+    if (match) return item[0] + "-" + match[1];
+  }
+  const generic = text.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)(?:[-_ ]?([A-Z]{1,4}))?\b/i);
+  if (generic) return generic[1].toUpperCase() + "-" + generic[2].toUpperCase() + (generic[3] ? "-" + generic[3].toUpperCase() : "");
+  if (allowPureNumeric) {
+    const num = text.match(/\b(\d{4,8})\b/);
+    if (num) return num[1];
+  }
+  return "";
+}
+
+function normalizeStreamCode(value) {
+  return extractStreamCode(value) || cleanText(value).toUpperCase().replace(/[_\s]+/g, "-");
+}
+
+function compareStreamCode(value) {
+  return normalizeStreamCode(value).toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value || ""));
+  } catch (error) {
+    return String(value || "");
+  }
+}
+
 function normalizeBaseUrl(baseUrl, params = {}) {
   const value = String(baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
   if (String((params && params.cfCookie) || "").trim()) return value;
@@ -987,13 +1318,21 @@ function normalizeBaseUrl(baseUrl, params = {}) {
 }
 
 function inferDetailHref(params = {}, baseUrl) {
-  const values = [params.link, params.detailLink, params.href, params.url, params.webUrl];
+  const values = [
+    params.link,
+    params.detailLink,
+    params.href,
+    params.pageUrl,
+    params.detailUrl,
+    params.url,
+    params.webUrl,
+    params.sourceItem && params.sourceItem.link,
+    params.sourceItem && params.sourceItem.detailUrl,
+  ];
   for (const value of values) {
     const decoded = decodeDetailLink(value);
     if (decoded && /\/video\//i.test(decoded)) return absolutize(decoded, baseUrl);
   }
-  const id = stableId(params.id || "");
-  if (id && !/^https?:/i.test(id) && !id.includes("undefined")) return `${normalizeBaseUrl(baseUrl)}/video/${trimSlashes(id)}/`;
   return "";
 }
 

@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.javguru",
   title: "JavGuru",
-  version: "1.0.2",
+  version: "1.0.3",
   requiredVersion: "0.0.1",
   description: "JavGuru list, search, detail and playable stream module",
   author: "Forward",
@@ -111,7 +111,11 @@ async function loadResource(params = {}) {
       userAgent: params.userAgent || saved.userAgent,
     });
     const directUrl = directPlayableParam(params);
-    const href = inferDetailHref(params, runtimeParams.baseUrl);
+    let href = inferDetailHref(params, runtimeParams.baseUrl);
+    if (!href) {
+      const code = extractStreamCodeFromParams(params);
+      if (code) href = await findDetailHrefByCode(code, runtimeParams);
+    }
     if (!href) {
       return directUrl ? [{
         name: playbackName(directUrl, 0),
@@ -220,9 +224,21 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
   if (code) descriptionParts.push("Code: " + code);
   if (releaseDate) descriptionParts.push("Release Date: " + releaseDate);
   if (genres.length) descriptionParts.push("Tags: " + genres.map((g) => g.title).join(", "));
+  const sourceItems = sources.map((source, index) => streamMediaSource(source, index, params, href));
+  const streamMeta = detailStreamMetadata({
+    href,
+    title: title || code || stableId(href),
+    code,
+    poster,
+    previewUrl: poster,
+    releaseDate,
+    description: descriptionParts.join("\n"),
+    genreItems: genres,
+    peoples,
+    mediaSources: sourceItems,
+  });
 
-  return {
-    id: stableId(href),
+  return Object.assign({
     type: "url",
     mediaType: "movie",
     title: title || code || stableId(href),
@@ -240,7 +256,103 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     peoples,
     relatedItems,
     trailers: sources[0] ? [{ coverUrl: poster, url: sources[0].url }] : [],
-  };
+  }, streamMeta);
+}
+
+async function findDetailHrefByCode(code, params = {}) {
+  const keys = aggregateSearchKeys(code);
+  for (const key of keys) {
+    try {
+      const html = await fetchPage(`${params.baseUrl}/?s=${encodeURIComponent(key)}`, params);
+      const items = parseVideoList(html, params.baseUrl);
+      const matched = items.find((item) => itemMatchesStreamCode(item, code));
+      if (matched && matched.link) return normalizeJavGuruUrl(decodeDetailLink(matched.link), params.baseUrl);
+    } catch (error) {
+      console.log("[javguru][aggregate] 搜索失败:", key, error.message || error);
+    }
+  }
+  return "";
+}
+
+function detailStreamMetadata(info = {}) {
+  const code = normalizeStreamCode(info.code || extractStreamCode(info.title));
+  const providerId = stableId(info.href || info.title || code);
+  const publicId = code || providerId;
+  const detailUrl = info.href || "";
+  const mediaSources = (info.mediaSources || []).filter((item) => item && item.url);
+  const sourceItem = compactObject({
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    providerDetailUrl: detailUrl,
+    code,
+    number: code,
+    javCode: code,
+    title: info.title,
+    name: info.title,
+    originalTitle: info.title,
+    originalName: info.title,
+    fileName: code || info.title,
+    filename: code || info.title,
+    link: encodeDetailLink(detailUrl),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: info.poster,
+    previewUrl: info.previewUrl,
+  });
+  return compactObject({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: providerId,
+    providerDetailUrl: detailUrl,
+    code,
+    number: code,
+    javCode: code,
+    title: info.title,
+    name: info.title,
+    originalTitle: info.title,
+    originalName: info.title,
+    keyword: code || info.title,
+    searchKeyword: code || info.title,
+    fileName: code || info.title,
+    filename: code || info.title,
+    link: encodeDetailLink(detailUrl),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
+    posterPath: info.poster,
+    previewUrl: info.previewUrl,
+    releaseDate: info.releaseDate,
+    description: info.description,
+    genreItems: info.genreItems,
+    peoples: info.peoples,
+    actors: (info.peoples || []).map((item) => item.title).filter(Boolean),
+    tags: (info.genreItems || []).map((item) => item.title).filter(Boolean),
+    mediaSource: mediaSources[0],
+    mediaSources: mediaSources.length ? mediaSources : undefined,
+    sourceItem,
+  });
+}
+
+function streamMediaSource(source = {}, index, params = {}, href = "") {
+  return compactObject({
+    name: playbackName(source.url, index, source.resolution),
+    title: playbackName(source.url, index, source.resolution),
+    source: source.source || "JavGuru",
+    quality: source.resolution || "",
+    resolution: source.resolution || "",
+    url: source.url,
+    streamUrl: source.url,
+    playUrl: source.url,
+    videoUrl: source.url,
+    referer: source.referer || href,
+    customHeaders: mediaHeaders(params, source.referer || href),
+  });
 }
 
 async function collectPlayableSources(html, referer, baseUrl, params = {}, options = {}) {
