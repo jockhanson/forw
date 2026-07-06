@@ -172,7 +172,7 @@ async function loadDetail(link) {
     const params = getRuntimeParams();
     const detail = await fetchVideoDetail(videoId, params);
     if (!detail || !detail.videoId) return null;
-    const sources = await collectPlayableSourcesWithFallback(detail, params);
+    const sources = await collectDetailEntryPlayableSources(detail, params);
     return toDetailItem(detail, params, sources);
   } catch (error) {
     console.error("[netflav][loadDetail] 失败:", error.message || error);
@@ -456,6 +456,16 @@ async function collectPlayableSources(video = {}, params = {}) {
 }
 
 async function collectPlayableSourcesWithFallback(video = {}, params = {}) {
+  return await collectPlayableSourcesFallbackChain(video, params, true);
+}
+
+async function collectDetailEntryPlayableSources(video = {}, params = {}) {
+  const streamSources = await collectAppModuleFallbackSources(video, params);
+  if (streamSources.length) return streamSources;
+  return await collectPlayableSourcesFallbackChain(video, params, false);
+}
+
+async function collectPlayableSourcesFallbackChain(video = {}, params = {}, includeAppFallback = true) {
   const primary = await collectPlayableSources(video, params);
   if (primary.length) return primary;
 
@@ -465,7 +475,7 @@ async function collectPlayableSourcesWithFallback(video = {}, params = {}) {
   const supjavSources = await collectSupjavFallbackSources(video, params);
   if (supjavSources.length) return supjavSources;
 
-  return await collectAppModuleFallbackSources(video, params);
+  return includeAppFallback ? await collectAppModuleFallbackSources(video, params) : [];
 }
 
 async function collectDetailPageSources(video = {}, params = {}) {
