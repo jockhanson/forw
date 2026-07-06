@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.netflav",
   title: "Netflav",
-  version: "1.0.1",
+  version: "1.0.2",
   requiredVersion: "0.0.1",
   description: "Netflav 列表、搜索、详情与播放源模块",
   author: "Forward",
@@ -21,6 +21,13 @@ WidgetMetadata = {
       type: "input",
       value: "https://netflav.com/api98",
       placeholders: [{ title: "Netflav API98", value: "https://netflav.com/api98" }],
+    },
+    {
+      name: "supjavCookie",
+      title: "Supjav Cookie",
+      type: "input",
+      value: "",
+      placeholders: [{ title: "可选，用于通过 Supjav 验证", value: "" }],
     },
   ],
   modules: [
@@ -119,6 +126,10 @@ const DEFAULT_API_BASE = "https://netflav.com/api98";
 const VIDEO_PLAYER_TYPE = "ijk";
 const DETAIL_ENDPOINTS = ["/video/v3/retrieveVideo/", "/video/v2/retrieveVideo/"];
 const YEAR_SELECTION_PAGE_SIZE = 24;
+const SUPJAV_BASE = "https://supjav.com";
+const SUPJAV_API = "https://lk1.supremejav.com/supjav.php";
+const SUPJAV_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15";
+const SUPJAV_REQUEST_TIMEOUT = 15000;
 
 async function loadList(params = {}) {
   try {
@@ -192,6 +203,7 @@ async function loadResource(params = {}) {
     const runtimeParams = {
       baseUrl: normalizeBaseUrl(params.baseUrl || saved.baseUrl),
       apiBase: normalizeBaseUrl(params.apiBase || saved.apiBase),
+      supjavCookie: normalizeCookie(params.supjavCookie || params.cookie || saved.supjavCookie),
     };
     const directUrl = directPlayableParam(params);
     if (directUrl) {
@@ -237,7 +249,7 @@ function toResourceItems(sources = [], runtimeParams = {}, fallbackReferer = "")
     description: source.source || "Netflav",
     url: source.url,
     playerType: VIDEO_PLAYER_TYPE,
-    customHeaders: mediaHeaders(runtimeParams, source.referer || fallbackReferer),
+    customHeaders: source.customHeaders || mediaHeaders(runtimeParams, source.referer || fallbackReferer),
   }));
 }
 
@@ -303,7 +315,9 @@ function toDetailItem(video = {}, params = {}, sources = []) {
     .map(toVideoItem);
   item.trailers = playableUrl(video.previewVideo) ? [{ coverUrl: item.posterPath, url: video.previewVideo }] : [];
   const firstSource = sources[0] || null;
-  item.customHeaders = mediaHeaders(params, firstSource ? (firstSource.referer || detailReferer(video.videoId, params)) : detailReferer(video.videoId, params));
+  item.customHeaders = firstSource && firstSource.customHeaders
+    ? firstSource.customHeaders
+    : mediaHeaders(params, firstSource ? (firstSource.referer || detailReferer(video.videoId, params)) : detailReferer(video.videoId, params));
   if (firstSource) item.videoUrl = firstSource.url;
   return item;
 }
@@ -448,6 +462,9 @@ async function collectPlayableSourcesWithFallback(video = {}, params = {}) {
   const pageSources = await collectDetailPageSources(video, params);
   if (pageSources.length) return pageSources;
 
+  const supjavSources = await collectSupjavFallbackSources(video, params);
+  if (supjavSources.length) return supjavSources;
+
   return await collectAppModuleFallbackSources(video, params);
 }
 
@@ -503,45 +520,321 @@ function decodeHtmlSource(html) {
     .replace(/&#39;|&apos;/gi, "'");
 }
 
-async function collectAppModuleFallbackSources(video = {}, params = {}) {
-  const bridge = appModuleFallbackBridge();
-  if (!bridge) return [];
+async function collectSupjavFallbackSources(video = {}, params = {}) {
+  const code = extractSupjavSearchCodeFromVideo(video, params);
+  if (!code) return [];
   try {
-    const result = await bridge(appModuleFallbackPayload(video, params));
-    const candidates = normalizeFallbackResourceCandidates(result, params, detailReferer(video.videoId || video._id || video.id, params));
-    return await resolveHighestQualityCandidates(candidates, params);
+    const detailUrl = await supjavDetailUrlForCode(code, params);
+    if (!detailUrl) return [];
+    const masterUrl = await supjavMasterByDetailUrl(detailUrl, params);
+    if (!masterUrl) return [];
+    return uniqueCandidates([{
+      url: masterUrl,
+      source: `Supjav TV ${code}`,
+      quality: "1080P",
+      referer: supjavMediaReferer(masterUrl),
+      customHeaders: supjavMediaHeaders(masterUrl),
+    }]);
   } catch (error) {
-    console.error("[netflav][collectAppModuleFallbackSources] 其它模块兜底失败:", error.message || error);
+    console.error("[netflav][collectSupjavFallbackSources] Supjav 兜底失败:", error.message || error);
     return [];
   }
 }
 
-function appModuleFallbackBridge() {
-  if (typeof Widget === "undefined" || !Widget) return null;
+function extractSupjavSearchCodeFromVideo(video = {}, params = {}) {
   const candidates = [
-    Widget.searchPlaybackSources,
-    Widget.searchVideoResources,
-    Widget.resolvePlaybackSources,
-    Widget.findPlaybackSources,
+    params.code,
+    params.number,
+    params.title,
+    params.name,
+    video.code,
+    video.number,
+    video.videoId,
+    video._id,
+    video.title,
+    video.title_zh,
+    video.title_en,
+    video.description,
+    video.preview,
+    video.preview_hp,
   ];
-  for (const fn of candidates) {
-    if (typeof fn === "function") return (payload) => fn.call(Widget, payload);
+  for (const value of candidates) {
+    const code = extractSupjavSearchCode(value, { allowPureNumeric: false, allowHtmlId: false });
+    if (code) return code;
   }
-  return null;
+  for (const value of collectStringValues([params, video])) {
+    const code = extractSupjavSearchCode(value, { allowPureNumeric: false, allowHtmlId: false });
+    if (code) return code;
+  }
+  return "";
+}
+
+function extractSupjavSearchCode(text, options = {}) {
+  const allowPureNumeric = options.allowPureNumeric === true;
+  const allowHtmlId = options.allowHtmlId === true;
+  const raw = cleanText(text);
+  if (!raw) return "";
+  const looksLikeUrl = /^https?:\/\//i.test(raw) || raw.includes("/");
+  if (looksLikeUrl && (isPreviewUrl(raw) || isStaticAssetUrl(raw))) return "";
+  if (/^https?:\/\//i.test(raw) && !/supjav\.com\/(?:[a-z]{2}\/)?\d{4,8}\.html/i.test(raw)) return "";
+  let value = raw.toUpperCase();
+  if (!value) return "";
+  value = value
+    .replace(/^[A-Z0-9]+(?:\.[A-Z0-9]+)+@/, "")
+    .replace(/^(?:HHD800|HHB800)[_\-@.\s]?/, "")
+    .replace(/\./g, " ")
+    .replace(/_/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const knownMakerPattern = /\b(?:SONE|S2M|MIAA|SSNI|SNIS|IPX|IPZZ|SSIS|JUQ|MIDE|MIDV|STARS|ABW|RKI|DVAJ|WANZ|LULU|DLDSS|VRTM|SDMU|SDDE|MKMP|HMN|MUDR|ADN|CAWD|PPPE|PRED|MGR|SHKD|MXGS|FSDSS|JUL|KTB|MIAB|GVH|MIMK|JUY|JUTA|IDBD|HND|DASD|CLO|BF|HONB|ROE|CEMD|MIUM|NITR|RCTD|RCT|IPVR|MIBD|JUR|JURD|SOE|ORE|PYO|START|NSFS|ESD|GVG|REAL|LAF|SMD|MD|BAD|MOND|ARSO|MOCKY|FONE|GANA|MUKO|PAPA|RASH|TAMA|ZUKO|HEY|PACO)\s*[-_ ]?\d{2,6}[A-Z]?(?:[-_ ]?[A-Z]{0,4})?\b/i;
+  const makerMatch = value.match(knownMakerPattern);
+  if (makerMatch && makerMatch[0]) return normalizeSupjavCode(makerMatch[0]);
+
+  const special = [
+    ["FC2", /\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i],
+    ["CARIB", /\bCARIB[- ]?(\d{6,8})\b/i],
+    ["1PONDO", /\b1PONDO[- ]?(\d{6,8})\b/i],
+    ["HEYZO", /\bHEYZO[- ]?(\d{3,6})\b/i],
+    ["T28", /\bT28[- ]?(\d{6,8})\b/i],
+  ];
+  for (const item of special) {
+    const match = value.match(item[1]);
+    if (match) return item[0] + "-" + match[1];
+  }
+
+  const generic = value.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10})\b/i);
+  if (generic) return generic[1].toUpperCase() + "-" + generic[2];
+
+  if (allowPureNumeric) {
+    const numMatch = value.match(/\b(\d{4,8})\b/);
+    if (numMatch) return numMatch[1];
+  }
+  if (allowHtmlId) {
+    const urlNumMatch = value.match(/(\d{4,8})\.html/);
+    if (urlNumMatch) return urlNumMatch[1];
+  }
+  return "";
+}
+
+function normalizeSupjavCode(value) {
+  return cleanText(value).replace(/\s+/g, "").replace(/_/g, "-").replace(/-+/g, "-").toUpperCase();
+}
+
+async function supjavDetailUrlForCode(code, params = {}) {
+  if (/^\d{4,8}$/.test(code)) return `${SUPJAV_BASE}/${code}.html`;
+  const searchUrl = `${SUPJAV_BASE}/?s=${encodeURIComponent(code)}`;
+  const res = await Widget.http.get(searchUrl, {
+    headers: supjavHeaders(params),
+    timeout: SUPJAV_REQUEST_TIMEOUT,
+  });
+  assertHttpOk(res, "Supjav 搜索页");
+  const html = String((res && res.data) || "");
+  if (isCloudflarePage(html)) throw new Error("Supjav 搜索页被 Cloudflare 拦截");
+  const id = selectSupjavSearchId(html, code);
+  return id ? `${SUPJAV_BASE}/${id}.html` : "";
+}
+
+function selectSupjavSearchId(html, code) {
+  const results = [];
+  const source = decodeHtmlSource(html);
+  const re = /<a\b([^>]*href=["'](?:https?:\/\/supjav\.com)?(?:\/[a-z]{2})?\/(\d{4,8})\.html["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = re.exec(source))) {
+    const title = cleanHtmlText(firstByRe(match[1], /\btitle=["']([^"']+)["']/i) || firstByRe(match[3], /\balt=["']([^"']+)["']/i) || match[3]);
+    results.push({ id: match[2], title });
+  }
+  if (!results.length) {
+    const ids = [];
+    const idRe = /href=["'](?:https?:\/\/supjav\.com)?(?:\/[a-z]{2})?\/(\d{4,8})\.html["']/gi;
+    while ((match = idRe.exec(source))) ids.push(match[1]);
+    for (const id of unique(ids)) results.push({ id, title: "" });
+  }
+  if (!results.length) throw new Error("Supjav 搜索页未找到详情页");
+  const target = normalizeSupjavCode(code).replace(/-/g, "");
+  const matched = results.find((item) => normalizeSupjavCode(item.title).replace(/-/g, "").includes(target));
+  return (matched || results[0]).id;
+}
+
+async function supjavMasterByDetailUrl(detailUrl, params = {}) {
+  const detail = await Widget.http.get(detailUrl, {
+    headers: supjavHeaders(params),
+    timeout: SUPJAV_REQUEST_TIMEOUT,
+  });
+  assertHttpOk(detail, "Supjav 详情页");
+  const html = String((detail && detail.data) || "");
+  if (isCloudflarePage(html)) throw new Error("Supjav 详情页被 Cloudflare 拦截");
+  const serverMap = supjavServerMap(html);
+  const dataLink = serverMap.TV || serverMap.tv || "";
+  if (!dataLink) throw new Error("Supjav 详情页未找到 TV data-link");
+  const apiUrl = `${SUPJAV_API}?c=${encodeURIComponent(reverseString(dataLink))}`;
+  const api = await Widget.http.get(apiUrl, {
+    headers: supjavHeaders(params, { Referer: SUPJAV_BASE + "/", Origin: SUPJAV_BASE }),
+    timeout: SUPJAV_REQUEST_TIMEOUT,
+  });
+  assertHttpOk(api, "Supjav 播放 API");
+  const masterUrl = extractSupjavM3U8(api && api.data);
+  if (!masterUrl) throw new Error("Supjav 播放 API 未返回 m3u8");
+  return masterUrl;
+}
+
+function supjavServerMap(html) {
+  const map = {};
+  const re = /data-link=["']([^"']+)["'][^>]*>\s*([^<]+?)\s*<\/a>/gi;
+  let match;
+  while ((match = re.exec(String(html || "")))) {
+    const dataLink = cleanText(match[1]);
+    const name = cleanText(match[2]);
+    if (dataLink && name) map[name] = dataLink;
+  }
+  return map;
+}
+
+function extractSupjavM3U8(text) {
+  const source = decodeHtmlSource(text);
+  const play = source.match(/urlPlay.*?(https?:\/\/[^"'\\\s<>]+?\.m3u8[^"'\\\s<>]*)/i);
+  if (play && play[1]) return play[1];
+  const any = source.match(/https?:\/\/[^"'\\\s<>]+?\.m3u8[^"'\\\s<>]*/i);
+  return any && any[0] ? any[0] : "";
+}
+
+function supjavHeaders(params = {}, extra = {}) {
+  const headers = {
+    "User-Agent": SUPJAV_UA,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    Referer: SUPJAV_BASE + "/",
+  };
+  const cookie = normalizeCookie(params.supjavCookie || params.cookie);
+  if (cookie) headers.Cookie = cookie;
+  for (const key in extra || {}) headers[key] = extra[key];
+  return headers;
+}
+
+function supjavMediaReferer(url) {
+  const origin = originFromUrl(url);
+  return origin ? origin + "/" : SUPJAV_BASE + "/";
+}
+
+function supjavMediaHeaders(url) {
+  return {
+    Referer: supjavMediaReferer(url),
+    "User-Agent": SUPJAV_UA,
+    Accept: "*/*",
+  };
+}
+
+function reverseString(value) {
+  return String(value || "").split("").reverse().join("");
+}
+
+function isCloudflarePage(html) {
+  return /Just a moment|cf-browser-verification|cf-challenge/i.test(String(html || ""));
+}
+
+function assertHttpOk(res, label) {
+  const status = Number((res && (res.statusCode || res.status)) || 200);
+  if (!res || status < 200 || status >= 300) throw new Error(`${label} HTTP ${status || "无响应"}`);
+}
+
+async function collectAppModuleFallbackSources(video = {}, params = {}) {
+  const bridges = appModuleFallbackBridges();
+  if (!bridges.length) return [];
+  const payload = appModuleFallbackPayload(video, params);
+  for (const bridge of bridges) {
+    try {
+      const result = await bridge.call(payload);
+      const candidates = normalizeFallbackResourceCandidates(result, params, detailReferer(video.videoId || video._id || video.id, params));
+      const sources = await resolveHighestQualityCandidates(candidates, params);
+      if (sources.length) return sources;
+    } catch (error) {
+      console.error("[netflav][collectAppModuleFallbackSources] " + bridge.name + " 兜底失败:", error.message || error);
+    }
+  }
+  return [];
+}
+
+function appModuleFallbackBridges() {
+  const bridges = [];
+  if (typeof Widget === "undefined" || !Widget) return bridges;
+  addAppBridge(bridges, "searchPlaybackSources", Widget, Widget.searchPlaybackSources);
+  addAppBridge(bridges, "searchVideoResources", Widget, Widget.searchVideoResources);
+  addAppBridge(bridges, "resolvePlaybackSources", Widget, Widget.resolvePlaybackSources);
+  addAppBridge(bridges, "findPlaybackSources", Widget, Widget.findPlaybackSources);
+  addAppBridge(bridges, "searchStreamSources", Widget, Widget.searchStreamSources);
+  addAppBridge(bridges, "searchStreamResources", Widget, Widget.searchStreamResources);
+  addAppBridge(bridges, "resolveStreamSources", Widget, Widget.resolveStreamSources);
+  addAppBridge(bridges, "resolveStreamResources", Widget, Widget.resolveStreamResources);
+  addAppBridge(bridges, "findStreamSources", Widget, Widget.findStreamSources);
+  addAppBridge(bridges, "findStreamResources", Widget, Widget.findStreamResources);
+  addAppBridge(bridges, "searchImportedStreams", Widget, Widget.searchImportedStreams);
+  addAppBridge(bridges, "searchImportedStreamSources", Widget, Widget.searchImportedStreamSources);
+  addAppBridge(bridges, "invokeStreamModules", Widget, Widget.invokeStreamModules);
+  addAppBridge(bridges, "callStreamModules", Widget, Widget.callStreamModules);
+  addAppBridge(bridges, "stream.search", Widget.stream, Widget.stream && Widget.stream.search);
+  addAppBridge(bridges, "stream.resolve", Widget.stream, Widget.stream && Widget.stream.resolve);
+  addAppBridge(bridges, "streams.search", Widget.streams, Widget.streams && Widget.streams.search);
+  addAppBridge(bridges, "streams.resolve", Widget.streams, Widget.streams && Widget.streams.resolve);
+  addAppBridge(bridges, "streamModules.search", Widget.streamModules, Widget.streamModules && Widget.streamModules.search);
+  addAppBridge(bridges, "streamModules.resolve", Widget.streamModules, Widget.streamModules && Widget.streamModules.resolve);
+  return bridges;
+}
+
+function addAppBridge(bridges, name, owner, fn) {
+  if (typeof fn !== "function") return;
+  for (const bridge of bridges) {
+    if (bridge.fn === fn) return;
+  }
+  bridges.push({
+    name,
+    fn,
+    call: (payload) => fn.call(owner || Widget, payload),
+  });
 }
 
 function appModuleFallbackPayload(video = {}, params = {}) {
   const videoId = String(video.videoId || video._id || video.id || "").trim();
-  return {
+  const title = cleanText(video.title || video.title_zh || video.title_en || video.code || videoId);
+  const code = extractSupjavSearchCodeFromVideo(video, params);
+  const detailUrl = detailReferer(videoId, params);
+  return compactParams({
     provider: WidgetMetadata.id,
-    title: cleanText(video.title || video.title_zh || video.title_en || video.code || videoId),
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    excludeProvider: WidgetMetadata.id,
+    fallbackType: "stream",
+    targetType: "stream",
+    useImportedStreams: true,
     id: videoId,
+    videoId,
+    code,
+    number: code,
+    title,
+    name: title,
+    keyword: code || title,
+    searchKeyword: code || title,
     link: encodeDetailLink(videoId),
-    detailUrl: detailReferer(videoId, params),
+    url: detailUrl,
+    detailUrl,
+    pageUrl: detailUrl,
     posterPath: cleanImage(video.preview || video.preview_hp),
+    previewUrl: playableUrl(video.previewVideo),
+    description: cleanText(video.description || ""),
     actors: cleanPeople(video.actors),
     tags: cleanTags(video.tags),
-  };
+    peoples: cleanPeople(video.actors).map((title) => ({ id: title, title, role: "actor" })),
+    genreItems: cleanTags(video.tags).map((title) => ({ id: title, title })),
+    sourceItem: compactParams({
+      id: videoId,
+      videoId,
+      title,
+      code: video.code,
+      posterPath: cleanImage(video.preview || video.preview_hp),
+      previewUrl: playableUrl(video.previewVideo),
+      link: encodeDetailLink(videoId),
+      detailUrl,
+    }),
+  });
 }
 
 function normalizeFallbackResourceCandidates(result, params = {}, referer = "") {
@@ -553,19 +846,29 @@ function normalizeFallbackResourceCandidates(result, params = {}, referer = "") 
   return uniqueCandidates(candidates);
 }
 
-function flattenFallbackResult(value, out = []) {
+function flattenFallbackResult(value, out = [], depth = 0, visited = []) {
   if (!value) return out;
+  if (depth > 6) return out;
   if (typeof value === "string") {
     out.push(value);
     return out;
   }
   if (Array.isArray(value)) {
-    for (const item of value) flattenFallbackResult(item, out);
+    for (const item of value) flattenFallbackResult(item, out, depth + 1, visited);
     return out;
   }
   if (typeof value === "object") {
+    for (const item of visited) {
+      if (item === value) return out;
+    }
+    visited.push(value);
     if (value.url || value.videoUrl || value.src || value.file || value.hls || value.m3u8 || value.playUrl) out.push(value);
-    for (const key of ["resources", "sources", "items", "result", "data", "videos"]) flattenFallbackResult(value[key], out);
+    const priorityKeys = ["resources", "sources", "streams", "streamSources", "items", "result", "data", "videos", "modules", "providers", "matches"];
+    for (const key of priorityKeys) flattenFallbackResult(value[key], out, depth + 1, visited);
+    for (const key in value) {
+      if (priorityKeys.indexOf(key) >= 0) continue;
+      flattenFallbackResult(value[key], out, depth + 1, visited);
+    }
   }
   return out;
 }
@@ -599,17 +902,19 @@ function sourceCandidateFromEntry(entry, defaults = {}) {
   const source = (entry && typeof entry === "object" && (entry.name || entry.label || entry.type || entry.source)) || defaults.source || "Netflav";
   const quality = (entry && typeof entry === "object" && (entry.quality || entry.resolution || entry.height || entry.label)) || defaults.quality || "";
   const referer = (entry && typeof entry === "object" && (entry.referer || entry.referrer || entry.pageUrl || entry.detailUrl)) || defaults.referer || "";
+  const customHeaders = (entry && typeof entry === "object" && (entry.customHeaders || entry.headers)) || defaults.customHeaders || null;
   return {
     url: playableUrl(url),
     source: cleanText(source),
     quality: cleanText(quality),
     referer,
+    customHeaders,
   };
 }
 
 function pushCandidate(candidates, candidate = {}) {
   const url = playableUrl(candidate.url);
-  if (!url || String(url).startsWith("magnet:") || isPreviewUrl(url)) return;
+  if (!url || String(url).startsWith("magnet:") || isPreviewUrl(url) || isStaticAssetUrl(url)) return;
   candidates.push({
     url,
     source: candidate.source || "Netflav",
@@ -617,6 +922,7 @@ function pushCandidate(candidates, candidate = {}) {
     resolution: candidate.resolution || "",
     bandwidth: Number(candidate.bandwidth || 0),
     referer: candidate.referer || "",
+    customHeaders: candidate.customHeaders || null,
     order: candidates.length,
   });
 }
@@ -661,12 +967,12 @@ function extractPlayableCandidates(value, meta = {}, candidates = []) {
 
 function isDirectMovieUrl(url) {
   const value = playableUrl(url).toLowerCase();
-  return !!value && !isPreviewUrl(value) && /\.(m3u8|mp4|webm)(?:[?#]|$)/i.test(value);
+  return !!value && !isPreviewUrl(value) && !isStaticAssetUrl(value) && /\.(m3u8|mp4|webm)(?:[?#]|$)/i.test(value);
 }
 
 function isPlayableCandidate(url) {
   const value = playableUrl(url).toLowerCase();
-  return !!value && !isPreviewUrl(value) && (
+  return !!value && !isPreviewUrl(value) && !isStaticAssetUrl(value) && (
     /\.(m3u8|mp4|webm)(?:[?#]|$)/i.test(value) ||
     /\/(?:get_file|download|stream|video|media|hls|playlist|master|source|file)(?:[/?#]|$)/i.test(value) ||
     /[?&](?:file|src|url|source|hls|video)=/i.test(value)
@@ -689,7 +995,7 @@ async function resolveHighestQualityCandidates(candidates = [], params = {}) {
 async function resolveHlsCandidate(candidate = {}, params = {}) {
   try {
     const res = await Widget.http.get(candidate.url, {
-      headers: mediaHeaders(params, candidate.referer),
+      headers: candidate.customHeaders || mediaHeaders(params, candidate.referer),
     });
     const text = String((res && res.data) || "");
     const variants = parseHlsVariants(text, candidate.url);
@@ -701,6 +1007,7 @@ async function resolveHlsCandidate(candidate = {}, params = {}) {
       resolution: variant.resolution,
       bandwidth: variant.bandwidth,
       referer: candidate.referer,
+      customHeaders: candidate.customHeaders || null,
     })))[0];
     if (hasSeparateAudioRendition(text)) {
       return [{
@@ -710,6 +1017,7 @@ async function resolveHlsCandidate(candidate = {}, params = {}) {
         resolution: best && best.resolution,
         bandwidth: best && best.bandwidth,
         referer: candidate.referer,
+        customHeaders: candidate.customHeaders || null,
       }];
     }
     return best ? [best] : [candidate];
@@ -772,7 +1080,7 @@ function uniqueCandidates(candidates = []) {
   const out = [];
   for (const candidate of candidates || []) {
     const url = playableUrl(candidate && candidate.url);
-    if (!url || seen[url]) continue;
+    if (!url || seen[url] || isPreviewUrl(url) || isStaticAssetUrl(url)) continue;
     seen[url] = true;
     out.push({
       url,
@@ -781,6 +1089,7 @@ function uniqueCandidates(candidates = []) {
       resolution: candidate.resolution || "",
       bandwidth: Number(candidate.bandwidth || 0),
       referer: candidate.referer || "",
+      customHeaders: candidate.customHeaders || null,
       order: candidate.order || out.length,
     });
   }
@@ -831,7 +1140,11 @@ function firstByRe(text, re) {
 
 function isPreviewUrl(url) {
   const value = String(url || "").toLowerCase();
-  return /(?:freepv|\/pv\/|preview|sample|trailer)/i.test(value);
+  return /(?:freepv|\/pv\/|preview|sample|trailer|teaser|thumb|thumbnail|poster)/i.test(value);
+}
+
+function isStaticAssetUrl(url) {
+  return /\.(?:jpe?g|png|gif|webp|avif|bmp|svg|ico)(?:[?#]|$)/i.test(playableUrl(url));
 }
 
 function cleanTags(tags = []) {
@@ -949,11 +1262,12 @@ function rememberRuntimeParams(params = {}) {
   Widget.storage.set("netflav.runtimeParams", {
     baseUrl: normalizeBaseUrl(params.baseUrl || DEFAULT_BASE_URL),
     apiBase: normalizeBaseUrl(params.apiBase || DEFAULT_API_BASE),
+    supjavCookie: normalizeCookie(params.supjavCookie || params.cookie || ""),
   });
 }
 
 function getRuntimeParams() {
-  return Widget.storage.get("netflav.runtimeParams") || { baseUrl: DEFAULT_BASE_URL, apiBase: DEFAULT_API_BASE };
+  return Widget.storage.get("netflav.runtimeParams") || { baseUrl: DEFAULT_BASE_URL, apiBase: DEFAULT_API_BASE, supjavCookie: "" };
 }
 
 function compactParams(params = {}) {
@@ -975,6 +1289,35 @@ function safePage(page) {
 
 function cleanText(text) {
   return String(text || "").replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function normalizeCookie(cookie) {
+  return cleanText(cookie)
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+function collectStringValues(value, depth = 0, out = [], visited = []) {
+  if (value === null || value === undefined || depth > 5) return out;
+  const type = typeof value;
+  if (type === "string" || type === "number") {
+    const text = String(value).trim();
+    if (text) out.push(text);
+    return out;
+  }
+  if (type !== "object") return out;
+  for (const item of visited) {
+    if (item === value) return out;
+  }
+  visited.push(value);
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringValues(item, depth + 1, out, visited);
+    return out;
+  }
+  for (const key in value) collectStringValues(value[key], depth + 1, out, visited);
+  return out;
 }
 
 function cleanHtmlText(html) {
