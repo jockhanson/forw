@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.javdb",
   title: "JavDB",
-  version: "1.0.1",
+  version: "1.0.2",
   requiredVersion: "0.0.1",
   description: "JavDB 列表、搜索与详情元数据模块",
   author: "Forward",
@@ -108,7 +108,7 @@ function optionList(list) {
 const DEFAULT_BASE_URL = "https://javdb.com";
 const DEFAULT_LOGIN_COOKIE = "";
 const RUNTIME_KEY = "javdb.runtimeParams";
-const VIDEO_CODE_RE = /(?:FC2(?:[-_\s]*PPV)?[-_\s]*\d{4,}|[A-Z]{2,10}[-_\s]?\d{2,}[A-Z]?)/i;
+const VIDEO_CODE_RE = /(?:FC2(?:[-_\s]*PPV)?[-_\s]*\d{4,}|1PONDO[-_\s]*\d{6,8}|CARIB[-_\s]*\d{6,8}|HEYZO[-_\s]*\d{3,6}|T28[-_\s]*\d{6,8}|[A-Z]{2,15}[-_\s]?\d{2,}[A-Z]?)/i;
 
 async function loadList(params = {}) {
   try {
@@ -308,12 +308,24 @@ function parseVideoDetail(html, href, baseUrl) {
     peoples,
     html,
   });
+  const title = formatVideoTitle(code, rawTitle) || code || detailIdFromUrl(href) || "JavDB";
+  const streamMeta = detailStreamMetadata({
+    href,
+    baseUrl,
+    code,
+    title,
+    poster,
+    releaseDate,
+    durationText,
+    description,
+    genres,
+    peoples,
+  });
 
-  return {
-    id: detailIdFromUrl(href) || stableId(href),
+  return Object.assign({
     type: "url",
     mediaType: "movie",
-    title: formatVideoTitle(code, rawTitle) || code || detailIdFromUrl(href) || "JavDB",
+    title,
     posterPath: poster,
     backdropPath: poster,
     backdropPaths,
@@ -327,7 +339,73 @@ function parseVideoDetail(html, href, baseUrl) {
     genreItems: genres,
     peoples,
     relatedItems,
-  };
+  }, streamMeta);
+}
+
+function detailStreamMetadata(info = {}) {
+  const href = normalizeJavDbUrl(info.href, info.baseUrl);
+  const javdbId = detailIdFromUrl(href) || stableId(href);
+  const code = normalizeCode(info.code || extractVideoCode(info.title));
+  const publicId = code || javdbId;
+  const title = cleanTitle(info.title || code || javdbId);
+  const poster = info.poster || "";
+  const sourceItem = compactObject({
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: javdbId,
+    javdbId,
+    code,
+    number: code,
+    javCode: code,
+    title,
+    name: title,
+    originalTitle: title,
+    originalName: title,
+    fileName: code || title,
+    filename: code || title,
+    link: encodeDetailLink(href),
+    url: href,
+    detailUrl: href,
+    pageUrl: href,
+    posterPath: poster,
+    previewUrl: poster,
+  });
+
+  return compactObject({
+    provider: WidgetMetadata.id,
+    sourceProvider: WidgetMetadata.id,
+    currentWidgetId: WidgetMetadata.id,
+    site: WidgetMetadata.site,
+    id: publicId,
+    videoId: publicId,
+    providerVideoId: javdbId,
+    javdbId,
+    code,
+    number: code,
+    javCode: code,
+    title,
+    name: title,
+    originalTitle: title,
+    originalName: title,
+    keyword: code || title,
+    searchKeyword: code || title,
+    fileName: code || title,
+    filename: code || title,
+    link: encodeDetailLink(href),
+    url: href,
+    detailUrl: href,
+    pageUrl: href,
+    posterPath: poster,
+    previewUrl: poster,
+    releaseDate: info.releaseDate,
+    durationText: info.durationText,
+    description: info.description,
+    genreItems: info.genres,
+    peoples: info.peoples,
+    actors: (info.peoples || []).map(function (item) { return item.title; }).filter(Boolean),
+    tags: (info.genres || []).map(function (item) { return item.title; }).filter(Boolean),
+    sourceItem,
+  });
 }
 
 function listTitle(html) {
@@ -960,6 +1038,17 @@ function unique(list) {
     if (!key || seen[key]) continue;
     seen[key] = true;
     out.push(item);
+  }
+  return out;
+}
+
+function compactObject(value) {
+  const out = {};
+  for (const key in value || {}) {
+    const item = value[key];
+    if (item === undefined || item === null || item === "") continue;
+    if (Array.isArray(item) && !item.length) continue;
+    out[key] = item;
   }
   return out;
 }
