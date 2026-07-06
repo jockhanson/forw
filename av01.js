@@ -664,25 +664,39 @@ function parseRoute(value, fallbackType) {
 }
 
 function inferVideoId(params = {}) {
-  const candidates = [
+  const explicitCandidates = [
     params.av01VideoId,
-    params.providerVideoId,
     params.sourceItem && params.sourceItem.av01VideoId,
+  ];
+  for (const candidate of explicitCandidates) {
+    const id = decodeDetailLink(candidate);
+    if (id && !isPlayableUrl(id)) return id;
+  }
+
+  const candidates = [
+    params.providerVideoId,
     params.sourceItem && params.sourceItem.providerVideoId,
     params.sourceItem && params.sourceItem.link,
-    params.videoId,
-    params.id,
     params.link,
     params.detailUrl,
     params.pageUrl,
     params.url,
     params.href,
+    params.videoId,
+    params.id,
   ];
   for (const candidate of candidates) {
     const id = decodeDetailLink(candidate);
-    if (id && !isPlayableUrl(id)) return id;
+    if (!id || isPlayableUrl(id) || isLikelyPublicStreamCode(id)) continue;
+    return id;
   }
   return "";
+}
+
+function isLikelyPublicStreamCode(value) {
+  const text = String(value || "").trim();
+  if (!text || /^\d+$/.test(text)) return false;
+  return !!extractStreamCode(text);
 }
 
 function directPlayableParam(params = {}) {
