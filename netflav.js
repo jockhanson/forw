@@ -161,7 +161,7 @@ async function loadDetail(link) {
     const params = getRuntimeParams();
     const detail = await fetchVideoDetail(videoId, params);
     if (!detail || !detail.videoId) return null;
-    const sources = await collectPlayableSources(detail, params);
+    const sources = await collectPlayableSourcesWithFallback(detail, params);
     return toDetailItem(detail, params, sources);
   } catch (error) {
     console.error("[netflav][loadDetail] 失败:", error.message || error);
@@ -201,7 +201,7 @@ async function loadResource(params = {}) {
     const videoId = decodeDetailLink(params.link || params.id || params.videoId || params.url);
     if (!videoId) return [];
     const detail = await fetchVideoDetail(videoId, runtimeParams);
-    const sources = await collectPlayableSources(detail, runtimeParams);
+    const sources = await collectPlayableSourcesWithFallback(detail, runtimeParams);
     return toResourceItems(sources, runtimeParams, detailReferer(detail && detail.videoId, runtimeParams));
   } catch (error) {
     console.error("[netflav][loadResource] 失败:", error.message || error);
@@ -441,6 +441,135 @@ async function collectPlayableSources(video = {}, params = {}) {
   return await resolveHighestQualityCandidates(candidates, params);
 }
 
+async function collectPlayableSourcesWithFallback(video = {}, params = {}) {
+  const primary = await collectPlayableSources(video, params);
+  if (primary.length) return primary;
+
+  const pageSources = await collectDetailPageSources(video, params);
+  if (pageSources.length) return pageSources;
+
+  return await collectAppModuleFallbackSources(video, params);
+}
+
+async function collectDetailPageSources(video = {}, params = {}) {
+  const videoId = String(video.videoId || video._id || video.id || "").trim();
+  if (!videoId) return [];
+  const referer = detailReferer(videoId, params);
+  try {
+    const res = await Widget.http.get(referer, { headers: buildHeaders(params) });
+    const html = String((res && res.data) || "");
+    const candidates = extractHtmlPlayableCandidates(html, referer, params.baseUrl || DEFAULT_BASE_URL);
+    return await resolveHighestQualityCandidates(candidates, params);
+  } catch (error) {
+    console.error("[netflav][collectDetailPageSources] 详情页兜底失败:", error.message || error);
+    return [];
+  }
+}
+
+function extractHtmlPlayableCandidates(html, referer = "", baseUrl = DEFAULT_BASE_URL) {
+  const source = decodeHtmlSource(html);
+  const candidates = [];
+  collectHtmlPlayableMatches(candidates, source, /<(?:source|video|iframe)\b[^>]*(?:src|data-src)=["']([^"']+)["']/gi, 1, referer, baseUrl);
+  collectHtmlPlayableMatches(candidates, source, /\b(?:file|src|url|source|hls|m3u8|video|videoUrl|video_url|playUrl)\s*[:=]\s*["']([^"']+)["']/gi, 1, referer, baseUrl);
+  collectHtmlPlayableMatches(candidates, source, /(https?:\/\/[^"'<>\s\\]+(?:\.m3u8|\.mp4|\.webm|\/(?:get_file|download|stream|video|media|hls|playlist|master|source|file))(?:[^"'<>\s\\]*)?)/gi, 1, referer, baseUrl);
+  collectHtmlPlayableMatches(candidates, source, /["']((?:\/\/|\/)[^"']*(?:\.m3u8|\.mp4|\.webm|\/(?:get_file|download|stream|video|media|hls|playlist|master|source|file))[^"']*)["']/gi, 1, referer, baseUrl);
+  return uniqueCandidates(candidates);
+}
+
+function collectHtmlPlayableMatches(candidates, source, re, groupIndex, referer, baseUrl) {
+  let match;
+  while ((match = re.exec(source || ""))) {
+    const url = absolutizeUrl(match[groupIndex], referer || baseUrl);
+    if (isHtmlPlayableCandidate(url, referer)) pushCandidate(candidates, { url, source: "Netflav 页面", referer });
+  }
+}
+
+function isHtmlPlayableCandidate(url, referer = "") {
+  return isPlayableCandidate(url) && !isLikelyDetailPageUrl(url, referer);
+}
+
+function isLikelyDetailPageUrl(url, referer = "") {
+  const value = playableUrl(url).split("#")[0];
+  if (!value) return false;
+  if (value === playableUrl(referer).split("#")[0]) return true;
+  return originFromUrl(value) === originFromUrl(referer) && /\/video\?(?:[^#]*&)?id=/i.test(value);
+}
+
+function decodeHtmlSource(html) {
+  return String(html || "")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;|&#38;/gi, "&")
+    .replace(/&quot;|&#34;/gi, "\"")
+    .replace(/&#39;|&apos;/gi, "'");
+}
+
+async function collectAppModuleFallbackSources(video = {}, params = {}) {
+  const bridge = appModuleFallbackBridge();
+  if (!bridge) return [];
+  try {
+    const result = await bridge(appModuleFallbackPayload(video, params));
+    const candidates = normalizeFallbackResourceCandidates(result, params, detailReferer(video.videoId || video._id || video.id, params));
+    return await resolveHighestQualityCandidates(candidates, params);
+  } catch (error) {
+    console.error("[netflav][collectAppModuleFallbackSources] 其它模块兜底失败:", error.message || error);
+    return [];
+  }
+}
+
+function appModuleFallbackBridge() {
+  if (typeof Widget === "undefined" || !Widget) return null;
+  const candidates = [
+    Widget.searchPlaybackSources,
+    Widget.searchVideoResources,
+    Widget.resolvePlaybackSources,
+    Widget.findPlaybackSources,
+  ];
+  for (const fn of candidates) {
+    if (typeof fn === "function") return (payload) => fn.call(Widget, payload);
+  }
+  return null;
+}
+
+function appModuleFallbackPayload(video = {}, params = {}) {
+  const videoId = String(video.videoId || video._id || video.id || "").trim();
+  return {
+    provider: WidgetMetadata.id,
+    title: cleanText(video.title || video.title_zh || video.title_en || video.code || videoId),
+    id: videoId,
+    link: encodeDetailLink(videoId),
+    detailUrl: detailReferer(videoId, params),
+    posterPath: cleanImage(video.preview || video.preview_hp),
+    actors: cleanPeople(video.actors),
+    tags: cleanTags(video.tags),
+  };
+}
+
+function normalizeFallbackResourceCandidates(result, params = {}, referer = "") {
+  const candidates = [];
+  for (const item of flattenFallbackResult(result)) {
+    const candidate = sourceCandidateFromEntry(item, { source: "App 其它模块", referer });
+    if (candidate.url && isPlayableCandidate(candidate.url)) pushCandidate(candidates, candidate);
+  }
+  return uniqueCandidates(candidates);
+}
+
+function flattenFallbackResult(value, out = []) {
+  if (!value) return out;
+  if (typeof value === "string") {
+    out.push(value);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) flattenFallbackResult(item, out);
+    return out;
+  }
+  if (typeof value === "object") {
+    if (value.url || value.videoUrl || value.src || value.file || value.hls || value.m3u8 || value.playUrl) out.push(value);
+    for (const key of ["resources", "sources", "items", "result", "data", "videos"]) flattenFallbackResult(value[key], out);
+  }
+  return out;
+}
+
 function collectMovieSources(video = {}, params = {}) {
   const candidates = [];
   const referer = detailReferer(video.videoId, params);
@@ -469,11 +598,12 @@ function sourceCandidateFromEntry(entry, defaults = {}) {
   if (!url || String(url).startsWith("magnet:")) return {};
   const source = (entry && typeof entry === "object" && (entry.name || entry.label || entry.type || entry.source)) || defaults.source || "Netflav";
   const quality = (entry && typeof entry === "object" && (entry.quality || entry.resolution || entry.height || entry.label)) || defaults.quality || "";
+  const referer = (entry && typeof entry === "object" && (entry.referer || entry.referrer || entry.pageUrl || entry.detailUrl)) || defaults.referer || "";
   return {
     url: playableUrl(url),
     source: cleanText(source),
     quality: cleanText(quality),
-    referer: defaults.referer || "",
+    referer,
   };
 }
 
