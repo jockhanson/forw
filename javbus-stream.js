@@ -66,6 +66,14 @@ function normalizeCookie(cookie) {
     .join("; ");
 }
 
+function cacheJavBusCookie(cookie) {
+  try {
+    if (cookie && typeof Widget !== "undefined" && Widget.storage && typeof Widget.storage.set === "function") {
+      Widget.storage.set("javbus.cookie", cookie);
+    }
+  } catch (_) {}
+}
+
 function normalizeCode(value) {
   return getText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
@@ -672,6 +680,7 @@ async function loadMagnetLinks(params = {}) {
       console.warn(LOG_PREFIX, "未配置 JavBus Cookie，无法通过年龄验证，跳过匹配");
       return [];
     }
+    cacheJavBusCookie(cookie);
 
     const code = extractCodeFromParams(params);
     if (!code) {

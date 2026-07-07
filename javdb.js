@@ -1,7 +1,7 @@
 WidgetMetadata = {
   id: "forward.javdb",
   title: "JavDB",
-  version: "1.0.2",
+  version: "1.0.3",
   requiredVersion: "0.0.1",
   description: "JavDB 列表、搜索与详情元数据模块",
   author: "Forward",
@@ -12,6 +12,8 @@ WidgetMetadata = {
     inputParam("cfCookie", "Cloudflare Cookie", "", [["浏览器通过验证后的 Cookie", "cf_clearance=..."]]),
     inputParam("loginCookie", "登录 Cookie", "", [["JavDB 登录后的完整 Cookie", "_jdb_session=...; remember_user_token=..."]]),
     inputParam("userAgent", "User-Agent", "", [["留空使用默认；如 Cookie 无效请填获取 Cookie 时浏览器的 UA", ""]]),
+    inputParam("javbusCookie", "JavBus Cookie", "", [["用于详情页“磁力链接”区块", ""]]),
+    inputParam("pan115Cookie", "115 Cookie", "", [["点击磁力链接提交 115 离线；留空时读取 pan115.cookie 缓存", ""]]),
   ],
   modules: [
     moduleEntry("loadCategories", "类别", 1800, [
@@ -108,6 +110,9 @@ function optionList(list) {
 const DEFAULT_BASE_URL = "https://javdb.com";
 const DEFAULT_LOGIN_COOKIE = "";
 const RUNTIME_KEY = "javdb.runtimeParams";
+const JAVBUS_BASE_URL = "https://www.javbus.com";
+const JAVBUS_AJAX_URL = JAVBUS_BASE_URL + "/ajax/uncledatoolsbyajax.php";
+const PAN115_COOKIE_KEY = "pan115.cookie";
 const VIDEO_CODE_RE = /(?:FC2(?:[-_\s]*PPV)?[-_\s]*\d{4,}|1PONDO[-_\s]*\d{6,8}|CARIB[-_\s]*\d{6,8}|HEYZO[-_\s]*\d{3,6}|T28[-_\s]*\d{6,8}|[A-Z]{2,15}[-_\s]?\d{2,}[A-Z]?)/i;
 
 async function loadList(params = {}) {
@@ -154,13 +159,14 @@ async function search(params = {}) {
 async function loadDetail(link) {
   try {
     const params = getRuntimeParams();
+    if (String(link || "").indexOf("offline-submit://") === 0) return await handleOfflineSubmitDetail(link, params);
     const entityRoute = decodeEntityLink(link);
     if (entityRoute) return await loadEntityDetail(entityRoute, params);
     const href = normalizeJavDbUrl(decodeDetailLink(link), params.baseUrl);
     if (!href || !isJavDbDetailUrl(href)) return null;
     const baseUrl = getOrigin(href) || params.baseUrl;
     const html = await fetchPage(href, params);
-    return parseVideoDetail(html, href, baseUrl);
+    return await parseVideoDetail(html, href, baseUrl, params);
   } catch (error) {
     console.error("[javdb][loadDetail] 失败:", error.message || error);
     throw error;
@@ -269,7 +275,7 @@ function parseVideoList(html, baseUrl) {
   return items;
 }
 
-function parseVideoDetail(html, href, baseUrl) {
+async function parseVideoDetail(html, href, baseUrl, params = {}) {
   const rawTitle = cleanTitle(
     firstByRe(html, /<h[12]\b[^>]*class=(["'])[^"']*\btitle\b[^"']*\1[^>]*>([\s\S]*?)<\/h[12]>/i, 2) ||
     firstByRe(html, /<meta\b[^>]*property=(["'])og:title\1[^>]*content=(["'])(.*?)\2/i, 3) ||
@@ -309,6 +315,7 @@ function parseVideoDetail(html, href, baseUrl) {
     html,
   });
   const title = formatVideoTitle(code, rawTitle) || code || detailIdFromUrl(href) || "JavDB";
+  const magnetItems = await buildJavBusMagnetItems(code, title, params);
   const streamMeta = detailStreamMetadata({
     href,
     baseUrl,
@@ -339,7 +346,427 @@ function parseVideoDetail(html, href, baseUrl) {
     genreItems: genres,
     peoples,
     relatedItems,
+    childItems: magnetItems,
   }, streamMeta);
+}
+
+async function buildJavBusMagnetItems(code, detailTitle, params = {}) {
+  const dvdId = normalizeCode(code);
+  if (!dvdId) return [];
+
+  const cookie = normalizeLooseCookie(params.javbusCookie || storageGet("javbus.cookie"));
+  if (!cookie) {
+    console.log("[javdb][javbus] 未配置 JavBus Cookie，跳过磁力链接区块");
+    return [];
+  }
+
+  try {
+    const detail = await fetchJavBusDetail(dvdId, cookie);
+    if (!detail || !detail.gid) {
+      console.log("[javdb][javbus] 未找到 JavBus 详情:", dvdId);
+      return [];
+    }
+
+    const html = await fetchJavBusAjax(detail, cookie);
+    const items = parseJavBusMagnetItems(html, dvdId, detail.detailUrl, detailTitle);
+    console.log("[javdb][javbus] 磁力链接数量:", items.length);
+    return items;
+  } catch (error) {
+    console.error("[javdb][javbus] 磁力链接加载失败:", error.message || error);
+    return [];
+  }
+}
+
+async function fetchJavBusDetail(code, cookie) {
+  const directUrl = JAVBUS_BASE_URL + "/" + encodeURIComponent(code);
+  const direct = await fetchJavBusHtml(directUrl, cookie, JAVBUS_BASE_URL + "/");
+  if (isJavBusBlocked(direct)) return null;
+
+  let detail = parseJavBusDetail(direct, directUrl, code);
+  if (detail.gid) return detail;
+
+  const searchUrl = JAVBUS_BASE_URL + "/search/" + encodeURIComponent(code) + "&type=&parent=ce";
+  const search = await fetchJavBusHtml(searchUrl, cookie, JAVBUS_BASE_URL + "/");
+  if (isJavBusBlocked(search)) return null;
+
+  const matchedUrl = findJavBusDetailUrl(search, code);
+  if (!matchedUrl) return null;
+
+  const matched = await fetchJavBusHtml(matchedUrl, cookie, searchUrl);
+  if (isJavBusBlocked(matched)) return null;
+  detail = parseJavBusDetail(matched, matchedUrl, code);
+  return detail.gid ? detail : null;
+}
+
+async function fetchJavBusHtml(url, cookie, referer) {
+  const response = await Widget.http.get(url, {
+    headers: javBusHeaders(cookie, referer),
+    timeout: 15000,
+  });
+  return String((response && response.data) || "");
+}
+
+async function fetchJavBusAjax(detail, cookie) {
+  const response = await Widget.http.get(JAVBUS_AJAX_URL, {
+    headers: Object.assign(javBusHeaders(cookie, detail.detailUrl), {
+      "X-Requested-With": "XMLHttpRequest",
+    }),
+    params: {
+      gid: detail.gid,
+      lang: "zh",
+      img: detail.img || "",
+      uc: detail.uc || "0",
+      floor: String(Math.floor(Math.random() * 1000 + 1)),
+    },
+    timeout: 15000,
+  });
+  return String((response && response.data) || "");
+}
+
+function javBusHeaders(cookie, referer) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    Referer: referer || JAVBUS_BASE_URL + "/",
+  };
+  if (cookie) headers.Cookie = cookie;
+  return headers;
+}
+
+function isJavBusBlocked(html) {
+  const lower = String(html || "").toLowerCase();
+  return lower.indexOf("age verification javbus") >= 0 ||
+    lower.indexOf('id="ageverify"') >= 0 ||
+    lower.indexOf("doc/driver-verify") >= 0 ||
+    lower.indexOf("你是否已經成年") >= 0 ||
+    lower.indexOf("我已經成年") >= 0;
+}
+
+function parseJavBusDetail(html, detailUrl, code) {
+  return {
+    code,
+    detailUrl,
+    gid: extractJsValue(html, "gid"),
+    uc: extractJsValue(html, "uc") || "0",
+    img: extractJsValue(html, "img"),
+  };
+}
+
+function findJavBusDetailUrl(html, code) {
+  const target = normalizeCode(code).replace(/[^A-Z0-9]/g, "");
+  const seen = {};
+  const linkRe = /<a\b([^>]*href\s*=\s*(["'])[^"']+\2[^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = linkRe.exec(String(html || "")))) {
+    const href = javBusAbsoluteUrl(attr(match[1], "href"));
+    if (!href || seen[href]) continue;
+    seen[href] = true;
+    const last = href.split("?")[0].split("#")[0].split("/").filter(Boolean).pop() || "";
+    const found = normalizeCode(last || cleanText(match[3])).replace(/[^A-Z0-9]/g, "");
+    if (found && found === target) return href;
+  }
+  return "";
+}
+
+function javBusAbsoluteUrl(url) {
+  const value = decodeHtml(String(url || "").trim());
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.indexOf("//") === 0) return "https:" + value;
+  if (value.charAt(0) === "/") return JAVBUS_BASE_URL + value;
+  return JAVBUS_BASE_URL + "/" + value;
+}
+
+function extractJsValue(html, name) {
+  const patterns = [
+    new RegExp("(?:var\\s+)?" + name + "\\s*=\\s*([\"'])(.*?)\\1", "i"),
+    new RegExp("(?:var\\s+)?" + name + "\\s*=\\s*([^;\\s]+)", "i"),
+    new RegExp("[?&]" + name + "=([^&\"'<>\\s]+)", "i"),
+  ];
+  for (const re of patterns) {
+    const match = String(html || "").match(re);
+    if (match) return decodeHtml(match[2] || match[1] || "");
+  }
+  return "";
+}
+
+function parseJavBusMagnetItems(html, code, detailUrl, detailTitle) {
+  const rows = parseMagnetRows(html);
+  const items = [];
+  const seen = {};
+
+  for (const row of rows) {
+    const magnetRe = /magnet:\?xt=urn:btih:[^"'<>\s]+/ig;
+    let match;
+    while ((match = magnetRe.exec(row))) {
+      const magnet = decodeHtml(match[0]);
+      const hash = magnetInfoHash(magnet);
+      const key = hash || stableId(magnet);
+      if (!key || seen[key]) continue;
+      seen[key] = true;
+
+      const rowText = cleanText(row);
+      const size = magnetSize(rowText);
+      const date = magnetDate(rowText);
+      const hasSubtitle = /字幕|中文字幕|subtitle|\bsub\b/i.test(rowText);
+      const hasHd = /高清|\bHD\b|1080|720|4K/i.test(rowText);
+      const tags = [];
+      if (hasSubtitle) tags.push("[字幕]");
+      if (hasHd) tags.push("[高清]");
+      const title = "磁力链接｜" + (tags.join("") + code + (size ? " " + size : "")).trim();
+      const link = buildOfflineSubmitLink(code, key, magnet, title, size);
+
+      items.push({
+        id: "javbus-magnet:" + code.toLowerCase() + ":" + key,
+        type: "url",
+        mediaType: "movie",
+        title,
+        description:
+          "来源: JavBus\n" +
+          "番号: " + (code || "未知") + "\n" +
+          "大小: " + (size || "未知") + "\n" +
+          "日期: " + (date || "未知") + "\n" +
+          "字幕: " + (hasSubtitle ? "是" : "未知") + "\n" +
+          "高清: " + (hasHd ? "是" : "未知") + "\n" +
+          "详情页: " + detailUrl + "\n" +
+          "操作: 点击保存到 115 网盘",
+        link,
+        playerType: "system",
+        originalTitle: detailTitle || code,
+        name: title,
+      });
+    }
+  }
+
+  return items;
+}
+
+function parseMagnetRows(html) {
+  const rows = [];
+  const trRe = /<tr\b[\s\S]*?<\/tr>/gi;
+  let match;
+  while ((match = trRe.exec(String(html || "")))) rows.push(match[0]);
+  if (rows.length) return rows;
+
+  const text = String(html || "");
+  const magnetRe = /magnet:\?xt=urn:btih:[^"'<>\s]+/gi;
+  while ((match = magnetRe.exec(text))) {
+    const start = Math.max(0, match.index - 300);
+    const end = Math.min(text.length, match.index + match[0].length + 300);
+    rows.push(text.slice(start, end));
+  }
+  return rows;
+}
+
+function magnetInfoHash(magnet) {
+  const match = String(magnet || "").match(/btih:([a-z0-9]{32,40})/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function magnetSize(text) {
+  const match = String(text || "").match(/\b(\d+(?:\.\d+)?\s*(?:GB|G|MB|M|GiB|MiB))\b/i);
+  return match ? match[1].replace(/\s+/g, " ").toUpperCase() : "";
+}
+
+function magnetDate(text) {
+  const match = String(text || "").match(/\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2})\b/);
+  return match ? match[1].replace(/[/.]/g, "-") : "";
+}
+
+function buildOfflineSubmitLink(code, candidateId, magnet, title, size) {
+  const query = [
+    "cid=" + encodeURIComponent(candidateId),
+    "magnet=" + encodeURIComponent(magnet || ""),
+    "title=" + encodeURIComponent(title || code || "磁力链接"),
+    "source=javbus",
+  ];
+  if (size) query.push("size=" + encodeURIComponent(size));
+  return "offline-submit://" + String(code || "").toLowerCase() + "?" + query.join("&");
+}
+
+async function handleOfflineSubmitDetail(link, params = {}) {
+  const info = parseOfflineSubmitLink(link);
+  if (!info.dvdId || !info.candidateId || !info.magnet) {
+    return buildOfflineReceipt(link, false, "提交失败", "未找到有效的磁力链接。");
+  }
+
+  const submittedKey = "offline-submitted:" + info.dvdId + ":" + info.candidateId;
+  const submitted = storageGetJSON(submittedKey, null);
+  if (submitted && submitted.ok) {
+    return buildOfflineReceipt(link, true, "此前已提交", "这条磁力已提交到 115。请返回原详情页刷新，等待资源匹配。");
+  }
+
+  const cookie = normalizeLooseCookie(params.pan115Cookie || storageGet(PAN115_COOKIE_KEY));
+  if (!cookie) {
+    return buildOfflineReceipt(link, false, "提交失败", "请先在 JavDB 全局参数填入 115 Cookie，或先让 pan115.js 成功加载一次以缓存 Cookie。");
+  }
+
+  let result;
+  try {
+    result = await pan115OfflineOneClick(cookie, info.magnet);
+  } catch (error) {
+    result = { state: false, error: String((error && error.message) || error) };
+  }
+
+  storageSetJSON(submittedKey, {
+    ok: result && result.state === true,
+    time: Date.now(),
+    title: info.title,
+    sizeText: info.size || "",
+    message: (result && result.error) || "",
+  });
+
+  if (result && result.state === true) {
+    return buildOfflineReceipt(link, true, "已提交到 115 离线下载", "任务已提交。请返回原详情页刷新，等待 115 资源匹配。");
+  }
+  return buildOfflineReceipt(link, false, "提交失败", (result && result.error) || "115 返回失败，请稍后重试。");
+}
+
+function parseOfflineSubmitLink(link) {
+  const value = String(link || "");
+  const rest = value.slice("offline-submit://".length);
+  const qIdx = rest.indexOf("?");
+  const rawDvdId = qIdx >= 0 ? rest.slice(0, qIdx) : rest;
+  const query = qIdx >= 0 ? parseQueryString(rest.slice(qIdx + 1)) : {};
+  const magnet = cleanText(query.magnet || query.maglink || query.url);
+  const candidateId = cleanText(query.cid || query.id || query.infoHash || magnetInfoHash(magnet) || stableId(magnet));
+  return {
+    dvdId: cleanText(query.dvd || query.code || rawDvdId).toLowerCase(),
+    candidateId,
+    magnet,
+    title: cleanText(query.title || query.name),
+    size: cleanText(query.size || query.sizeText),
+  };
+}
+
+function parseQueryString(query) {
+  const out = {};
+  String(query || "").split("&").forEach(function (pair) {
+    if (!pair) return;
+    const index = pair.indexOf("=");
+    const key = index >= 0 ? pair.slice(0, index) : pair;
+    const value = index >= 0 ? pair.slice(index + 1) : "";
+    if (!key) return;
+    try {
+      out[key] = decodeURIComponent(value || "");
+    } catch (_) {
+      out[key] = value || "";
+    }
+  });
+  return out;
+}
+
+async function pan115OfflineOneClick(cookie, magnet) {
+  const token = await getPan115OfflineToken(cookie);
+  return submitPan115OfflineTask(cookie, magnet, token);
+}
+
+async function getPan115OfflineToken(cookie) {
+  const response = await Widget.http.get("https://115.com/?ct=offline&ac=space&_=" + Date.now(), {
+    headers: pan115Headers(cookie),
+    timeout: 15000,
+  });
+  const json = parseJsonPayload(response && response.data);
+  if (!json || json.state !== true) {
+    throw new Error("space 获取失败: " + ((json && (json.error || json.error_msg)) || JSON.stringify(json || {})));
+  }
+  return { sign: json.sign, time: json.time };
+}
+
+async function submitPan115OfflineTask(cookie, magnet, token) {
+  const uid = extractUidFromCookie(cookie);
+  const body = "url=" + encodeURIComponent(String(magnet || "").trim()) +
+    "&uid=" + encodeURIComponent(uid) +
+    "&sign=" + encodeURIComponent(token.sign) +
+    "&time=" + encodeURIComponent(token.time);
+  const response = await Widget.http.post(
+    "https://115.com/web/lixian/?ct=lixian&ac=add_task_url",
+    body,
+    {
+      headers: Object.assign(pan115Headers(cookie), {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: "https://115.com",
+        Referer: "https://115.com/",
+      }),
+      timeout: 20000,
+    }
+  );
+  const json = parseJsonPayload(response && response.data);
+  if (json && json.state === true) return { state: true, info_hash: json.info_hash || "" };
+  return {
+    state: false,
+    error: json && json.errcode === "911" ? "账号使用异常，请手工验证" : ((json && (json.error_msg || json.error)) || "未知错误"),
+  };
+}
+
+function pan115Headers(cookie) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    Referer: "https://115.com/",
+    Origin: "https://115.com",
+  };
+  if (cookie) headers.Cookie = cookie;
+  return headers;
+}
+
+function extractUidFromCookie(cookie) {
+  const first = String(cookie || "").split(";")[0].trim();
+  const index = first.indexOf("=");
+  return index >= 0 ? first.slice(index + 1) : "";
+}
+
+function parseJsonPayload(data) {
+  if (typeof data === "string") return JSON.parse(data);
+  if (data && typeof data === "object") return data;
+  return null;
+}
+
+function buildOfflineReceipt(link, ok, title, message) {
+  return {
+    id: link,
+    type: "url",
+    mediaType: "movie",
+    title,
+    description: message,
+    link,
+    playerType: "system",
+  };
+}
+
+function normalizeLooseCookie(value) {
+  return String(value || "")
+    .split(/[\r\n]+/)
+    .map(function (line) { return line.trim(); })
+    .filter(Boolean)
+    .join("; ");
+}
+
+function storageGet(key) {
+  try {
+    return Widget.storage.get(key);
+  } catch (_) {
+    return "";
+  }
+}
+
+function storageGetJSON(key, fallback) {
+  try {
+    const raw = Widget.storage.get(key);
+    if (!raw) return fallback;
+    if (typeof raw === "string") return JSON.parse(raw);
+    return raw;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function storageSetJSON(key, value) {
+  try {
+    Widget.storage.set(key, JSON.stringify(value));
+  } catch (_) {}
 }
 
 function detailStreamMetadata(info = {}) {
@@ -772,13 +1199,24 @@ function rememberRuntimeParams(params = {}) {
     cfCookie: String(params.cfCookie || saved.cfCookie || "").trim(),
     loginCookie: String(params.loginCookie || saved.loginCookie || "").trim(),
     userAgent: String(params.userAgent || saved.userAgent || "").trim(),
+    javbusCookie: String(params.javbusCookie || saved.javbusCookie || "").trim(),
+    pan115Cookie: String(params.pan115Cookie || saved.pan115Cookie || "").trim(),
   };
+  if (next.javbusCookie) Widget.storage.set("javbus.cookie", normalizeLooseCookie(next.javbusCookie));
+  if (next.pan115Cookie) Widget.storage.set(PAN115_COOKIE_KEY, normalizeLooseCookie(next.pan115Cookie));
   Widget.storage.set(RUNTIME_KEY, next);
   return next;
 }
 
 function getRuntimeParams() {
-  return Widget.storage.get(RUNTIME_KEY) || { baseUrl: DEFAULT_BASE_URL, cfCookie: "", loginCookie: "", userAgent: "" };
+  return Widget.storage.get(RUNTIME_KEY) || {
+    baseUrl: DEFAULT_BASE_URL,
+    cfCookie: "",
+    loginCookie: "",
+    userAgent: "",
+    javbusCookie: "",
+    pan115Cookie: "",
+  };
 }
 
 function buildHeaders(params = {}, referer) {

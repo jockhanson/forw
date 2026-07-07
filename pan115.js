@@ -591,6 +591,11 @@ function resolveCookie(params) {
 
 function syncCookie(cookie) {
   COOKIE_115 = cookie || "";
+  try {
+    if (COOKIE_115 && typeof Widget !== "undefined" && Widget.storage && typeof Widget.storage.set === "function") {
+      Widget.storage.set("pan115.cookie", COOKIE_115);
+    }
+  } catch (_) {}
 }
 
 // ==================== 构建函数 ====================
