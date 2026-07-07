@@ -1,4 +1,4 @@
-// ==================== 115 Forward Module v1.3.2 ====================
+// ==================== 115 Forward Module v1.3.3 ====================
 // 功能：
 //   1. 浏览 115 网盘文件夹，展示视频文件列表，点击进入详情页聚合播放
 //   2. 作为 Stream Source，在番号详情页下方匹配 115 文件，提供 HLS 播放源
@@ -9,6 +9,7 @@
 //   7. (NEW v1.3.1) extractMatchKey 三层调度：JAV → Western(强) → WesternDate(弱)
 //   8. (NEW v1.3.1) scoreWesternFile 评分选片：排除 trailer/sample/preview，大文件优先
 //   9. (NEW v1.3.2) offline-submit:// 支持 magnet= 直传，供外部磁力区块一键提交
+//  10. (NEW v1.3.3) loadResource 支持直接 magnet: 点击路由，内部转 115 离线提交
 //
 // 设计原则：
 //   - link 只放路由 + 纯 ASCII 番号（聚合触发信号），不编码中文/日文
@@ -40,7 +41,7 @@ var WidgetMetadata = {
   title: "115 网盘",
   description: "浏览 115 网盘视频文件，提供番号匹配播放源；详情页展示 Sukebei 磁力候选，用户点击确认提交 115 离线",
   author: "forward-user",
-  version: "1.3.2",
+  version: "1.3.3",
   requiredVersion: "0.0.1",
   site: "https://115.com",
   detailCacheDuration: 300,
@@ -907,13 +908,21 @@ async function loadResource(params) {
     return await handleOfflineSubmitFromResource(params, link);
   }
 
-  // 2. 115 浏览页本地文件：直接按 pickcode 播放（不依赖番号/搜索）
+  // 2. 外部磁力卡片点击：直接提交 115 离线任务
+  var directMagnet = extractDirectMagnetFromParams(params, link);
+  if (directMagnet) {
+    var offlineLink = buildOfflineSubmitLinkFromMagnet(params || {}, directMagnet);
+    console.log("[pan115/stream] direct magnet detected, route offline-submit:", offlineLink.slice(0, 120));
+    return await handleOfflineSubmitFromResource(params || {}, offlineLink);
+  }
+
+  // 3. 115 浏览页本地文件：直接按 pickcode 播放（不依赖番号/搜索）
   if (link.indexOf("115detail://") === 0) {
     console.log("[pan115/stream] 115detail detected:", link);
     return await handleDirectPickcodeResource(params, link);
   }
 
-  // 3. 外部详情页聚合：需要番号搜索（JAV）或欧美 scene key 搜索
+  // 4. 外部详情页聚合：需要番号搜索（JAV）或欧美 scene key 搜索
   console.log("[pan115/stream] params keys:", JSON.stringify(Object.keys(params)));
   try {
     var cookie = resolveCookie(params);
@@ -1266,6 +1275,44 @@ function parseOfflineSubmitLink(link) {
     sizeBytes: Number(query.sizeBytes || 0) || parseSizeBytes(query.size || ""),
     source: getText(query.source || "direct")
   };
+}
+
+function isMagnetLink(value) {
+  return /^magnet:\?xt=urn:btih:/i.test(getText(value));
+}
+
+function extractDirectMagnetFromParams(params, link) {
+  var candidates = [
+    link,
+    params && params.url,
+    params && params.videoUrl,
+    params && params.magnetUrl,
+    params && params.maglink,
+    params && params.magnet
+  ];
+
+  for (var i = 0; i < candidates.length; i++) {
+    var value = getText(candidates[i]);
+    if (isMagnetLink(value)) return value;
+  }
+
+  return "";
+}
+
+function buildOfflineSubmitLinkFromMagnet(params, magnet) {
+  var title = getText(
+    params && (params.title || params.name || params.displayTitle || params.filename)
+  ) || "磁力链接";
+  var dvdId = extractNumber(title) || getText(params && (params.dvdId || params.code || params.number)) || "magnet";
+  var candidateId = extractInfoHash(magnet) || simpleHash(magnet);
+  var query = [
+    "cid=" + encodeURIComponent(candidateId),
+    "magnet=" + encodeURIComponent(magnet),
+    "title=" + encodeURIComponent(title),
+    "source=direct-magnet"
+  ];
+
+  return "offline-submit://" + encodeURIComponent(dvdId.toLowerCase()) + "?" + query.join("&");
 }
 
 function findOfflineCandidate(info) {

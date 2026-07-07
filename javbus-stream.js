@@ -1,10 +1,10 @@
 WidgetMetadata = {
   id: "javbus.stream",
-  title: "JavBus Magnet",
-  description: "通过番号匹配 JavBus 磁力资源，作为独立磁力链接区块展示",
+  title: "磁力链接",
+  description: "通过番号匹配 JavBus 磁力资源",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.2.0",
+  version: "1.3.1",
   requiredVersion: "0.0.1",
   globalParams: [
     {
@@ -16,10 +16,11 @@ WidgetMetadata = {
   ],
   modules: [
     {
-      id: "loadMagnetLinks",
+      id: "loadResource",
       title: "磁力链接",
       description: "根据当前视频信息匹配 JavBus 磁力链接，点击提交到 115 离线下载",
-      functionName: "loadMagnetLinks",
+      functionName: "loadResource",
+      type: "stream",
       cacheDuration: 120,
       params: []
     }
@@ -612,11 +613,12 @@ function parseMagnetItems(html, code, detailUrl) {
 
       if (hasSubtitle) tags.push("[字幕]");
       if (hasHd) tags.push("[高清]");
-      const title = (tags.join("") + code + (size ? " " + size : "")).trim();
+      const rawTitle = (tags.join("") + code + (size ? " " + size : "")).trim();
+      const title = "磁力链接｜" + rawTitle;
       const offlineLink = buildPan115OfflineLink(code, candidateId, magnet, title, size);
 
       pan115Candidates.push({
-        title: title,
+        title: rawTitle,
         maglink: magnet,
         size: size || "",
         sizeBytes: parseSizeBytes(size),
@@ -627,7 +629,6 @@ function parseMagnetItems(html, code, detailUrl) {
 
       items.push({
         id: "javbus-magnet:" + normalizePan115DvdId(code) + ":" + candidateId,
-        type: "url",
         title: title,
         name: title,
         description:
@@ -640,8 +641,16 @@ function parseMagnetItems(html, code, detailUrl) {
           "高清：" + (hasHd ? "是" : "未知") + "\n" +
           "详情页：" + detailUrl + "\n" +
           "操作：点击提交到 115 离线下载",
+        url: magnet,
+        videoUrl: magnet,
         link: offlineLink,
-        magnetUrl: magnet
+        actionLink: offlineLink,
+        offlineLink: offlineLink,
+        magnetUrl: magnet,
+        playerType: "system",
+        customHeaders: {
+          "X-Forward-Skip-Redirect-Probe": "1"
+        }
       });
     }
   }
