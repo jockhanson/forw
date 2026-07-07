@@ -4,7 +4,7 @@ WidgetMetadata = {
   description: "通过番号匹配 JavBus 磁力资源",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.0.0",
+  version: "1.1.0",
   requiredVersion: "0.0.1",
   globalParams: [
     {
@@ -32,6 +32,7 @@ const JAVBUS_AJAX = JAVBUS_BASE + "/ajax/uncledatoolsbyajax.php";
 const REQUEST_TIMEOUT = 15000;
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15";
 const LOG_PREFIX = "[javbus-stream]";
+const PAN115_MAGNET_CACHE_TTL = 3600 * 1000;
 
 function getText(value) {
   return String(value || "").trim();
@@ -478,6 +479,73 @@ function extractDate(text) {
   return match ? match[1].replace(/[/.]/g, "-") : "";
 }
 
+function normalizePan115DvdId(code) {
+  return getText(code).toLowerCase();
+}
+
+function parseSizeBytes(sizeText) {
+  const match = String(sizeText || "").replace(/,/g, "").match(/([\d.]+)\s*(GiB|MiB|KiB|GB|G|MB|M|KB|K|B)?/i);
+  if (!match) return 0;
+
+  const value = parseFloat(match[1]);
+  if (!isFinite(value)) return 0;
+
+  const unit = (match[2] || "B").toUpperCase();
+  const map = {
+    GIB: 1024 * 1024 * 1024,
+    GB: 1024 * 1024 * 1024,
+    G: 1024 * 1024 * 1024,
+    MIB: 1024 * 1024,
+    MB: 1024 * 1024,
+    M: 1024 * 1024,
+    KIB: 1024,
+    KB: 1024,
+    K: 1024,
+    B: 1
+  };
+
+  return value * (map[unit] || 1);
+}
+
+function simpleHash(value) {
+  let hash = 0;
+  const text = String(value || "");
+  for (let i = 0; i < text.length; i++) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return "h" + Math.abs(hash).toString(36);
+}
+
+function buildPan115Tags(hasSubtitle, hasHd, rowText) {
+  const tags = [];
+  if (hasSubtitle) tags.push("cnsub");
+  if (hasHd) tags.push("hd");
+  if (/4K|2160/i.test(rowText || "")) tags.push("4k");
+  return tags;
+}
+
+function storePan115MagnetCandidates(code, candidates) {
+  const dvdId = normalizePan115DvdId(code);
+  if (!dvdId || !candidates || !candidates.length) return;
+
+  try {
+    if (typeof Widget === "undefined" || !Widget.storage || typeof Widget.storage.set !== "function") return;
+    Widget.storage.set("magnet-candidates:" + dvdId, JSON.stringify({
+      time: Date.now(),
+      ttl: PAN115_MAGNET_CACHE_TTL,
+      items: candidates
+    }));
+    console.log(LOG_PREFIX, "已写入 pan115 磁力候选缓存:", dvdId, candidates.length);
+  } catch (error) {
+    console.warn(LOG_PREFIX, "写入 pan115 磁力候选缓存失败:", error.message || error);
+  }
+}
+
+function buildPan115OfflineLink(code, candidateId) {
+  return "offline-submit://" + normalizePan115DvdId(code) + "?cid=" + encodeURIComponent(candidateId);
+}
+
 function parseMagnetRows(html) {
   const rows = [];
   let match;
@@ -504,6 +572,7 @@ function parseMagnetItems(html, code, detailUrl) {
   const rows = parseMagnetRows(html);
   const seen = new Set();
   const items = [];
+  const pan115Candidates = [];
 
   for (const row of rows) {
     const magnetRe = /magnet:\?xt=urn:btih:[^"'<>\s]+/ig;
@@ -511,9 +580,10 @@ function parseMagnetItems(html, code, detailUrl) {
 
     while ((match = magnetRe.exec(row)) !== null) {
       const magnet = decodeHtml(match[0]);
-      const key = extractMagnetHash(magnet) || magnet;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
+      const hash = extractMagnetHash(magnet);
+      const seenKey = hash || magnet;
+      if (!seenKey || seen.has(seenKey)) continue;
+      seen.add(seenKey);
 
       const rowText = stripTags(row);
       const size = extractSize(rowText);
@@ -521,12 +591,26 @@ function parseMagnetItems(html, code, detailUrl) {
       const hasSubtitle = /字幕|中文字幕|subtitle|\bsub\b/i.test(rowText);
       const hasHd = /高清|\bHD\b|1080|720|4K/i.test(rowText);
       const tags = [];
+      const candidateId = hash || simpleHash(magnet);
+      const pan115Tags = buildPan115Tags(hasSubtitle, hasHd, rowText);
+      const offlineLink = buildPan115OfflineLink(code, candidateId);
 
       if (hasSubtitle) tags.push("[字幕]");
       if (hasHd) tags.push("[高清]");
+      const title = (tags.join("") + code + (size ? " " + size : "")).trim();
+
+      pan115Candidates.push({
+        title: title,
+        maglink: magnet,
+        size: size || "",
+        sizeBytes: parseSizeBytes(size),
+        infoHash: candidateId,
+        source: "javbus",
+        tags: pan115Tags
+      });
 
       items.push({
-        name: (tags.join("") + code + (size ? " " + size : "")).trim(),
+        name: title,
         description:
           "来源：JavBus\n" +
           "类型：Magnet\n" +
@@ -535,12 +619,16 @@ function parseMagnetItems(html, code, detailUrl) {
           "日期：" + (date || "未知") + "\n" +
           "字幕：" + (hasSubtitle ? "是" : "未知") + "\n" +
           "高清：" + (hasHd ? "是" : "未知") + "\n" +
-          "详情页：" + detailUrl,
-        url: magnet
+          "详情页：" + detailUrl + "\n" +
+          "操作：点击提交到 115 离线下载",
+        url: offlineLink,
+        link: offlineLink,
+        magnetUrl: magnet
       });
     }
   }
 
+  storePan115MagnetCandidates(code, pan115Candidates);
   return items;
 }
 
