@@ -1,4 +1,4 @@
-// ==================== 115 Forward Module v1.3.1 ====================
+// ==================== 115 Forward Module v1.3.2 ====================
 // 功能：
 //   1. 浏览 115 网盘文件夹，展示视频文件列表，点击进入详情页聚合播放
 //   2. 作为 Stream Source，在番号详情页下方匹配 115 文件，提供 HLS 播放源
@@ -8,6 +8,7 @@
 //   6. (NEW v1.3.1) 欧美 Scene 弱匹配聚合：deeper.19.04.19 / vixen.20.08.14 (studio + date)
 //   7. (NEW v1.3.1) extractMatchKey 三层调度：JAV → Western(强) → WesternDate(弱)
 //   8. (NEW v1.3.1) scoreWesternFile 评分选片：排除 trailer/sample/preview，大文件优先
+//   9. (NEW v1.3.2) offline-submit:// 支持 magnet= 直传，供外部磁力区块一键提交
 //
 // 设计原则：
 //   - link 只放路由 + 纯 ASCII 番号（聚合触发信号），不编码中文/日文
@@ -39,7 +40,7 @@ var WidgetMetadata = {
   title: "115 网盘",
   description: "浏览 115 网盘视频文件，提供番号匹配播放源；详情页展示 Sukebei 磁力候选，用户点击确认提交 115 离线",
   author: "forward-user",
-  version: "1.3.1",
+  version: "1.3.2",
   requiredVersion: "0.0.1",
   site: "https://115.com",
   detailCacheDuration: 300,
@@ -1215,6 +1216,76 @@ function storeSetJSON(key, value) {
   }
 }
 
+function parseQueryString(query) {
+  var result = {};
+  String(query || "").split("&").forEach(function (pair) {
+    if (!pair) return;
+    var idx = pair.indexOf("=");
+    var key = idx >= 0 ? pair.slice(0, idx) : pair;
+    var value = idx >= 0 ? pair.slice(idx + 1) : "";
+    if (!key) return;
+    try {
+      result[key] = decodeURIComponent(value || "");
+    } catch (_) {
+      result[key] = value || "";
+    }
+  });
+  return result;
+}
+
+function parseOfflineSubmitLink(link) {
+  var rest = String(link || "").slice("offline-submit://".length);
+  var qIdx = rest.indexOf("?");
+  var rawDvdId = qIdx >= 0 ? rest.slice(0, qIdx) : rest;
+  var query = qIdx >= 0 ? parseQueryString(rest.slice(qIdx + 1)) : {};
+  var dvdId = "";
+
+  try {
+    dvdId = decodeURIComponent(rawDvdId || "");
+  } catch (_) {
+    dvdId = rawDvdId || "";
+  }
+
+  var magnet = getText(query.magnet || query.maglink || query.url);
+  var candidateId = getText(query.cid || query.id || query.infoHash);
+  if (!candidateId && magnet) {
+    candidateId = extractInfoHash(magnet) || simpleHash(magnet);
+  }
+
+  return {
+    dvdId: getText(query.dvd || query.code || dvdId).toLowerCase(),
+    candidateId: candidateId,
+    magnet: magnet,
+    title: getText(query.title || query.name),
+    size: getText(query.size || query.sizeText),
+    sizeBytes: Number(query.sizeBytes || 0) || parseSizeBytes(query.size || ""),
+    source: getText(query.source || "direct")
+  };
+}
+
+function findOfflineCandidate(info) {
+  if (info && info.magnet) {
+    return {
+      title: info.title || info.dvdId || "磁力链接",
+      maglink: info.magnet,
+      size: info.size || "",
+      sizeBytes: info.sizeBytes || 0,
+      infoHash: info.candidateId,
+      source: info.source || "direct",
+      tags: []
+    };
+  }
+
+  var cached = storeGetJSON("magnet-candidates:" + info.dvdId, null);
+  var candidates = (cached && cached.items) || [];
+  for (var i = 0; i < candidates.length; i++) {
+    var cid = candidates[i].infoHash || ("idx_" + i);
+    if (cid === info.candidateId) return candidates[i];
+  }
+
+  return null;
+}
+
 // ==================== v1.2.0: Sukebei 磁力引擎 ====================
 
 /**
@@ -1552,16 +1623,9 @@ function buildReceipt(link, ok, title, message) {
  */
 async function handleOfflineSubmit(link) {
   // 1. 解析参数
-  var rest = link.slice("offline-submit://".length);
-  var qIdx = rest.indexOf("?");
-  var dvdId = qIdx >= 0 ? rest.slice(0, qIdx) : rest;
-  var cidStr = qIdx >= 0 ? rest.slice(qIdx + 1) : "";
-  var candidateId = "";
-
-  cidStr.split("&").forEach(function (pair) {
-    var kv = pair.split("=");
-    if (kv[0] === "cid") candidateId = decodeURIComponent(kv[1] || "");
-  });
+  var info = parseOfflineSubmitLink(link);
+  var dvdId = info.dvdId;
+  var candidateId = info.candidateId;
 
   if (!dvdId || !candidateId) {
     return buildReceipt(link, false, "提交失败", "未找到有效的番号和候选标识");
@@ -1574,14 +1638,8 @@ async function handleOfflineSubmit(link) {
       "这条磁力已提交到 115。请返回原详情页并刷新，等待资源匹配。");
   }
 
-  // 3. 从缓存读取磁力候选
-  var cached = storeGetJSON("magnet-candidates:" + dvdId, null);
-  var candidates = (cached && cached.items) || [];
-  var candidate = null;
-  for (var i = 0; i < candidates.length; i++) {
-    var cid = candidates[i].infoHash || ("idx_" + i);
-    if (cid === candidateId) { candidate = candidates[i]; break; }
-  }
+  // 3. 从直传参数或缓存读取磁力候选
+  var candidate = findOfflineCandidate(info);
 
   if (!candidate) {
     return buildReceipt(link, false, "提交失败",
@@ -1632,15 +1690,9 @@ async function handleOfflineSubmit(link) {
  */
 async function handleOfflineSubmitFromResource(params, link) {
   // 1. 解析参数
-  var rest = link.slice("offline-submit://".length);
-  var qIdx = rest.indexOf("?");
-  var dvdId = qIdx >= 0 ? rest.slice(0, qIdx) : rest;
-  var cidStr = qIdx >= 0 ? rest.slice(qIdx + 1) : "";
-  var candidateId = "";
-  cidStr.split("&").forEach(function (pair) {
-    var kv = pair.split("=");
-    if (kv[0] === "cid") candidateId = decodeURIComponent(kv[1] || "");
-  });
+  var info = parseOfflineSubmitLink(link);
+  var dvdId = info.dvdId;
+  var candidateId = info.candidateId;
 
   if (!dvdId || !candidateId) {
     console.error("[pan115/stream] offline-submit parse failed:", link);
@@ -1667,14 +1719,8 @@ async function handleOfflineSubmitFromResource(params, link) {
   // 4. 写 pending
   storeSetJSON(pendingKey, { time: Date.now() });
 
-  // 5. 从缓存读取磁力候选
-  var cached = storeGetJSON("magnet-candidates:" + dvdId, null);
-  var candidates = (cached && cached.items) || [];
-  var candidate = null;
-  for (var i = 0; i < candidates.length; i++) {
-    var cid = candidates[i].infoHash || ("idx_" + i);
-    if (cid === candidateId) { candidate = candidates[i]; break; }
-  }
+  // 5. 从直传参数或缓存读取磁力候选
+  var candidate = findOfflineCandidate(info);
 
   if (!candidate) {
     console.error("[pan115/stream] offline candidate not found for:", candidateId);

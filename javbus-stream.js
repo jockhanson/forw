@@ -1,10 +1,10 @@
 WidgetMetadata = {
   id: "javbus.stream",
   title: "JavBus Magnet",
-  description: "通过番号匹配 JavBus 磁力资源",
+  description: "通过番号匹配 JavBus 磁力资源，作为独立磁力链接区块展示",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.1.0",
+  version: "1.2.0",
   requiredVersion: "0.0.1",
   globalParams: [
     {
@@ -16,11 +16,10 @@ WidgetMetadata = {
   ],
   modules: [
     {
-      id: "loadResource",
-      title: "JavBus 磁力资源",
-      description: "根据当前视频信息匹配 JavBus 磁力链接",
-      functionName: "loadResource",
-      type: "stream",
+      id: "loadMagnetLinks",
+      title: "磁力链接",
+      description: "根据当前视频信息匹配 JavBus 磁力链接，点击提交到 115 离线下载",
+      functionName: "loadMagnetLinks",
       cacheDuration: 120,
       params: []
     }
@@ -542,8 +541,17 @@ function storePan115MagnetCandidates(code, candidates) {
   }
 }
 
-function buildPan115OfflineLink(code, candidateId) {
-  return "offline-submit://" + normalizePan115DvdId(code) + "?cid=" + encodeURIComponent(candidateId);
+function buildPan115OfflineLink(code, candidateId, magnet, title, size) {
+  const query = [
+    "cid=" + encodeURIComponent(candidateId),
+    "magnet=" + encodeURIComponent(magnet || ""),
+    "title=" + encodeURIComponent(title || code || "JavBus Magnet")
+  ];
+
+  if (size) query.push("size=" + encodeURIComponent(size));
+  query.push("source=javbus");
+
+  return "offline-submit://" + normalizePan115DvdId(code) + "?" + query.join("&");
 }
 
 function parseMagnetRows(html) {
@@ -593,11 +601,11 @@ function parseMagnetItems(html, code, detailUrl) {
       const tags = [];
       const candidateId = hash || simpleHash(magnet);
       const pan115Tags = buildPan115Tags(hasSubtitle, hasHd, rowText);
-      const offlineLink = buildPan115OfflineLink(code, candidateId);
 
       if (hasSubtitle) tags.push("[字幕]");
       if (hasHd) tags.push("[高清]");
       const title = (tags.join("") + code + (size ? " " + size : "")).trim();
+      const offlineLink = buildPan115OfflineLink(code, candidateId, magnet, title, size);
 
       pan115Candidates.push({
         title: title,
@@ -610,6 +618,9 @@ function parseMagnetItems(html, code, detailUrl) {
       });
 
       items.push({
+        id: "javbus-magnet:" + normalizePan115DvdId(code) + ":" + candidateId,
+        type: "url",
+        title: title,
         name: title,
         description:
           "来源：JavBus\n" +
@@ -621,7 +632,6 @@ function parseMagnetItems(html, code, detailUrl) {
           "高清：" + (hasHd ? "是" : "未知") + "\n" +
           "详情页：" + detailUrl + "\n" +
           "操作：点击提交到 115 离线下载",
-        url: offlineLink,
         link: offlineLink,
         magnetUrl: magnet
       });
@@ -655,7 +665,7 @@ async function fetchMagnets(detail, params) {
   return parseMagnetItems(ajax.html, detail.code, detail.detailUrl);
 }
 
-async function loadResource(params = {}) {
+async function loadMagnetLinks(params = {}) {
   try {
     const cookie = normalizeCookie(params.cookie);
     if (!cookie) {
@@ -685,4 +695,14 @@ async function loadResource(params = {}) {
     console.error(LOG_PREFIX, "loadResource 失败:", error.message || error);
     return [];
   }
+}
+
+async function loadResource(params = {}) {
+  const link = getText(params.link);
+  if (link.indexOf("offline-submit://") === 0) {
+    console.log(LOG_PREFIX, "检测到离线提交路由，等待 pan115 处理:", link.slice(0, 120));
+    return [];
+  }
+
+  return loadMagnetLinks(params);
 }
