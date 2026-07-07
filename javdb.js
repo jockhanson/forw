@@ -160,6 +160,7 @@ async function loadDetail(link) {
   try {
     const params = getRuntimeParams();
     if (String(link || "").indexOf("offline-submit://") === 0) return await handleOfflineSubmitDetail(link, params);
+    if (String(link || "").indexOf("magnet-status://") === 0) return buildOfflineReceipt(link, false, "磁力链接", "这是一张状态提示卡，请按卡片说明配置 Cookie 或稍后刷新。");
     const entityRoute = decodeEntityLink(link);
     if (entityRoute) return await loadEntityDetail(entityRoute, params);
     const href = normalizeJavDbUrl(decodeDetailLink(link), params.baseUrl);
@@ -316,6 +317,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
   });
   const title = formatVideoTitle(code, rawTitle) || code || detailIdFromUrl(href) || "JavDB";
   const magnetItems = await buildJavBusMagnetItems(code, title, params);
+  const visibleRelatedItems = magnetItems.concat(relatedItems);
   const streamMeta = detailStreamMetadata({
     href,
     baseUrl,
@@ -345,7 +347,7 @@ async function parseVideoDetail(html, href, baseUrl, params = {}) {
     playerType: "system",
     genreItems: genres,
     peoples,
-    relatedItems,
+    relatedItems: visibleRelatedItems,
     childItems: magnetItems,
   }, streamMeta);
 }
@@ -357,24 +359,36 @@ async function buildJavBusMagnetItems(code, detailTitle, params = {}) {
   const cookie = normalizeLooseCookie(params.javbusCookie || storageGet("javbus.cookie"));
   if (!cookie) {
     console.log("[javdb][javbus] 未配置 JavBus Cookie，跳过磁力链接区块");
-    return [];
+    return [buildMagnetStatusItem(dvdId, "磁力链接｜需要配置 JavBus Cookie", "请在 JavDB 全局参数填入 JavBus Cookie，或先打开/刷新 JavBus Magnet 模块让它缓存 Cookie。")];
   }
 
   try {
     const detail = await fetchJavBusDetail(dvdId, cookie);
     if (!detail || !detail.gid) {
       console.log("[javdb][javbus] 未找到 JavBus 详情:", dvdId);
-      return [];
+      return [buildMagnetStatusItem(dvdId, "磁力链接｜未找到 JavBus 详情", "未在 JavBus 找到 " + dvdId + " 的可用详情或年龄验证未通过。")];
     }
 
     const html = await fetchJavBusAjax(detail, cookie);
     const items = parseJavBusMagnetItems(html, dvdId, detail.detailUrl, detailTitle);
     console.log("[javdb][javbus] 磁力链接数量:", items.length);
-    return items;
+    return items.length ? items : [buildMagnetStatusItem(dvdId, "磁力链接｜暂无资源", "JavBus 暂未返回 " + dvdId + " 的磁力链接。")];
   } catch (error) {
     console.error("[javdb][javbus] 磁力链接加载失败:", error.message || error);
-    return [];
+    return [buildMagnetStatusItem(dvdId, "磁力链接｜加载失败", String((error && error.message) || error || "未知错误"))];
   }
+}
+
+function buildMagnetStatusItem(code, title, message) {
+  return {
+    id: "javbus-magnet-status:" + String(code || "").toLowerCase(),
+    type: "url",
+    mediaType: "movie",
+    title,
+    description: message,
+    link: "magnet-status://" + String(code || "").toLowerCase(),
+    playerType: "system",
+  };
 }
 
 async function fetchJavBusDetail(code, cookie) {
