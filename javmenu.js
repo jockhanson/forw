@@ -1,16 +1,15 @@
 WidgetMetadata = {
-  id: "javmenu.full",
-  title: "JAVMenu",
-  description: "JAVMenu site browser and stream matcher",
-  author: "Forward",
+  id: "javmenu.magnet",
+  title: "JAVMenu Magnet",
+  description: "通过番号匹配 JAVMenu 磁力资源",
+  author: "EL",
   site: "https://javmenu.com",
-  version: "1.0.0",
+  version: "1.1.0",
   requiredVersion: "0.0.1",
-  detailCacheDuration: 300,
   globalParams: [
     {
       name: "baseUrl",
-      title: "Base URL",
+      title: "JAVMenu Base URL",
       type: "input",
       value: "https://javmenu.com",
       placeholders: [
@@ -19,9 +18,9 @@ WidgetMetadata = {
     },
     {
       name: "cookie",
-      title: "Cookie",
+      title: "JAVMenu Cookie",
       type: "input",
-      description: "After passing Cloudflare in your browser, paste the full Cookie header here."
+      description: "在浏览器通过 JAVMenu Cloudflare 验证后，复制整段 Cookie 填入（含名）。"
     },
     {
       name: "userAgent",
@@ -32,1073 +31,215 @@ WidgetMetadata = {
   ],
   modules: [
     {
-      id: "loadList",
-      title: "JAVMenu List",
-      description: "Browse JAVMenu list/category pages",
-      functionName: "loadList",
-      cacheDuration: 600,
-      params: [
-        {
-          name: "path",
-          title: "Path",
-          type: "input",
-          value: "/zh",
-          placeholders: [
-            { title: "Chinese home", value: "/zh" },
-            { title: "Latest", value: "/zh/latest" },
-            { title: "Popular", value: "/zh/popular" }
-          ]
-        },
-        { name: "page", title: "Page", type: "page" }
-      ]
-    },
-    {
       id: "loadResource",
-      title: "JAVMenu Streams",
-      description: "Match the current title/code against JAVMenu and return directly exposed media URLs",
+      title: "JAVMenu 磁力资源",
+      description: "根据当前视频信息匹配 JAVMenu 磁力链接",
       functionName: "loadResource",
       type: "stream",
       cacheDuration: 120,
       params: []
     }
-  ],
-  search: {
-    title: "Search",
-    functionName: "search",
-    params: [
-      {
-        name: "keyword",
-        title: "Keyword",
-        type: "input",
-        placeholders: [
-          { title: "Code", value: "ABP-123" }
-        ]
-      },
-      { name: "page", title: "Page", type: "page" }
-    ]
-  }
+  ]
 };
 
 const JAVMENU_DEFAULT_BASE = "https://javmenu.com";
-const JAVMENU_DEFAULT_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15";
-const JAVMENU_TIMEOUT = 15000;
-const JAVMENU_STORAGE_PARAMS = "javmenu.full.lastParams";
+const REQUEST_TIMEOUT = 15000;
+const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15";
+const LOG_PREFIX = "[javmenu-magnet]";
 
 function getText(value) {
   return String(value || "").trim();
 }
 
-function normalizeSpace(value) {
-  return getText(value).replace(/\s+/g, " ").trim();
+function normalizeBaseUrl(baseUrl) {
+  return (getText(baseUrl) || JAVMENU_DEFAULT_BASE).replace(/\/+$/, "");
 }
 
-function normalizeBaseUrl(baseUrl) {
-  const value = getText(baseUrl) || JAVMENU_DEFAULT_BASE;
-  return value.replace(/\/+$/, "");
+function decodeHtml(value) {
+  return getText(value)
+    .replace(/\\u002[fF]/g, "/")
+    .replace(/\\\//g, "/")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x([0-9a-f]+);/gi, function (_, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    })
+    .replace(/&#(\d+);/g, function (_, dec) {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (e) {
+    return value;
+  }
+}
+
+function stripTags(html) {
+  return decodeHtml(String(html || "").replace(/<[^>]+>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeCookie(cookie) {
   return getText(cookie)
     .split(/[\r\n]+/)
-    .map((line) => line.trim())
+    .map(function (line) { return line.trim(); })
     .filter(Boolean)
     .join("; ");
 }
 
-function decodeHtml(value) {
-  return String(value || "")
-    .replace(/\\u002[fF]/g, "/")
-    .replace(/\\\//g, "/")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, function (_, n) {
-      return String.fromCharCode(Number(n));
-    })
-    .replace(/&#x([0-9a-f]+);/gi, function (_, n) {
-      return String.fromCharCode(parseInt(n, 16));
-    });
+function normalizeCode(value) {
+  return getText(value).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
-function stripTags(value) {
-  return decodeHtml(String(value || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " "));
+function formatMatchedCode(value) {
+  const cleaned = getText(value)
+    .replace(/\s+/g, "")
+    .replace(/_/g, "-")
+    .replace(/-+/g, "-")
+    .toUpperCase();
+  const match = cleaned.match(/^([A-Z]{2,15})-?(\d{2,10}[A-Z]?)(?:-?([A-Z]{1,4}))?$/);
+  if (!match) return cleaned;
+  return match[1] + "-" + match[2] + (match[3] ? "-" + match[3] : "");
 }
 
 function toAbsoluteUrl(href, baseUrl) {
   const base = normalizeBaseUrl(baseUrl);
-  let value = decodeHtml(getText(href));
-  if (!value || value === "#" || /^javascript:/i.test(value) || /^mailto:/i.test(value)) return "";
+  const value = decodeHtml(href);
+  if (!value) return "";
+  if (/^magnet:/i.test(value)) return value;
   if (/^https?:\/\//i.test(value)) return value;
   if (value.indexOf("//") === 0) return "https:" + value;
   if (value.charAt(0) === "/") return base + value;
   return base + "/" + value.replace(/^\/+/, "");
 }
 
-function urlPath(url) {
-  const value = getText(url);
-  const match = value.match(/^https?:\/\/[^/]+(\/[^?#]*)?/i);
-  return match ? (match[1] || "/") : value.split("?")[0].split("#")[0];
-}
-
-function itemIdFromUrl(url, fallback) {
-  const source = getText(urlPath(url)) || getText(fallback);
-  return "javmenu:" + source
-    .replace(/^https?:\/\//i, "")
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase();
-}
-
-function readStoredParams() {
-  try {
-    if (!Widget || !Widget.storage || !Widget.storage.get) return {};
-    const value = Widget.storage.get(JAVMENU_STORAGE_PARAMS);
-    if (!value) return {};
-    if (typeof value === "object") return value;
-    return JSON.parse(value);
-  } catch (e) {
-    return {};
-  }
-}
-
-function rememberParams(params) {
-  try {
-    if (!Widget || !Widget.storage || !Widget.storage.set) return;
-    const kept = {
-      baseUrl: normalizeBaseUrl(params && params.baseUrl),
-      cookie: getText(params && params.cookie),
-      userAgent: getText(params && params.userAgent) || JAVMENU_DEFAULT_UA
-    };
-    Widget.storage.set(JAVMENU_STORAGE_PARAMS, JSON.stringify(kept));
-  } catch (e) {
-    console.warn("[javmenu] failed to persist params:", e.message || e);
-  }
-}
-
-function mergeParams(params) {
-  const stored = readStoredParams();
-  const input = params || {};
-  return {
-    baseUrl: input.baseUrl || stored.baseUrl || JAVMENU_DEFAULT_BASE,
-    cookie: input.cookie !== undefined ? input.cookie : stored.cookie,
-    userAgent: input.userAgent || stored.userAgent || JAVMENU_DEFAULT_UA
-  };
-}
-
-function buildHeaders(params, referer, extra) {
-  const merged = mergeParams(params);
-  const base = normalizeBaseUrl(merged.baseUrl);
-  const headers = {
-    "User-Agent": getText(merged.userAgent) || JAVMENU_DEFAULT_UA,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Referer": referer || base + "/"
-  };
-  const cookie = normalizeCookie(merged.cookie);
-  if (cookie) headers["Cookie"] = cookie;
-  return Object.assign(headers, extra || {});
-}
-
-function getHeader(headers, name) {
-  if (!headers) return "";
-  const target = String(name || "").toLowerCase();
-  for (const key of Object.keys(headers)) {
-    if (String(key).toLowerCase() === target) return String(headers[key] || "");
-  }
-  return "";
-}
-
-function isChallengeResponse(status, headers, html) {
-  const body = String(html || "");
-  return Number(status) === 403 ||
-    /challenge/i.test(getHeader(headers, "cf-mitigated")) ||
-    /Just a moment|cf-browser-verification|challenges\.cloudflare\.com|cf-chl|cf-mitigated/i.test(body);
-}
-
-async function requestPage(url, params, referer, queryParams) {
-  const merged = mergeParams(params);
-  const absoluteUrl = toAbsoluteUrl(url, merged.baseUrl);
-  const options = {
-    headers: buildHeaders(merged, referer),
-    timeout: JAVMENU_TIMEOUT
-  };
-  if (queryParams && Object.keys(queryParams).length) {
-    options.params = queryParams;
-  }
-
-  try {
-    const resp = await Widget.http.get(absoluteUrl, options);
-    if (!resp) {
-      console.warn("[javmenu] empty response:", absoluteUrl);
-      return "";
-    }
-
-    const status = resp.statusCode || resp.status || 200;
-    const html = String(resp.data || "");
-    if (isChallengeResponse(status, resp.headers, html)) {
-      console.warn("[javmenu] Cloudflare challenge or HTTP 403:", absoluteUrl);
-      return "";
-    }
-    if (Number(status) >= 400) {
-      console.warn("[javmenu] HTTP " + status + ":", absoluteUrl);
-      return "";
-    }
-    return html;
-  } catch (error) {
-    console.warn("[javmenu] request failed:", absoluteUrl, error.message || error);
-    return "";
-  }
-}
-
-function extractAttr(fragment, name) {
-  const pattern = new RegExp("\\s" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "i");
-  const match = String(fragment || "").match(pattern);
+function extractAttr(html, name) {
+  const re = new RegExp("\\b" + name + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "i");
+  const match = String(html || "").match(re);
   return match ? decodeHtml(match[2]) : "";
 }
 
-function firstAttr(fragment, names) {
-  for (const name of names) {
-    const value = extractAttr(fragment, name);
-    if (value) return value;
-  }
-  return "";
-}
-
-function extractMeta(html, key) {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp("<meta\\b(?=[^>]*(?:property|name)=[\"']" + escaped + "[\"'])[^>]*>", "i"),
-    new RegExp("<meta\\b(?=[^>]*(?:property|name)=[^\"'\\s>]*" + escaped + "[^\"'\\s>]*)[^>]*>", "i")
-  ];
-
-  for (const pattern of patterns) {
-    const tag = String(html || "").match(pattern);
-    if (tag && tag[0]) {
-      const content = extractAttr(tag[0], "content");
-      if (content) return normalizeSpace(content);
-    }
-  }
-  return "";
-}
-
-function extractTitleTag(html) {
-  const h1 = String(html || "").match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-  if (h1 && h1[1]) return normalizeSpace(stripTags(h1[1]));
-
-  const title = String(html || "").match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
-  if (title && title[1]) {
-    return normalizeSpace(stripTags(title[1]).replace(/\s*[-|]\s*JAVMenu\s*$/i, ""));
-  }
-
-  return "";
-}
-
-function isMediaUrl(url) {
-  return /\.(?:m3u8|mp4)(?:[?#].*)?$/i.test(getText(url));
-}
-
-function isImageUrl(url) {
-  return /\.(?:jpg|jpeg|png|webp|gif|avif)(?:[?#].*)?$/i.test(getText(url));
-}
-
-function isLikelyPageHref(href) {
-  const value = getText(href);
-  if (!value) return false;
-  if (/^(?:#|javascript:|mailto:)/i.test(value)) return false;
-  if (isMediaUrl(value) || isImageUrl(value) || /\.(?:css|js|json|xml)(?:[?#].*)?$/i.test(value)) return false;
-  return true;
-}
-
-function readFirstString(object, keys) {
-  if (!object || typeof object !== "object") return "";
-  for (const key of keys) {
-    const value = object[key];
-    if (typeof value === "string" || typeof value === "number") return getText(value);
-    if (value && typeof value === "object" && typeof value.url === "string") return getText(value.url);
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === "string" || typeof item === "number") return getText(item);
-        if (item && typeof item === "object" && typeof item.url === "string") return getText(item.url);
-      }
-    }
-  }
-  return "";
-}
-
-function readAllStrings(value, out) {
-  const results = out || [];
-  if (value === null || value === undefined) return results;
-  if (typeof value === "string" || typeof value === "number") {
-    const text = getText(value);
-    if (text) results.push(text);
-    return results;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) readAllStrings(item, results);
-    return results;
-  }
-  if (typeof value === "object") {
-    if (typeof value.url === "string") results.push(getText(value.url));
-    if (typeof value.src === "string") results.push(getText(value.src));
-  }
-  return results;
-}
-
-function readImage(object) {
-  if (!object || typeof object !== "object") return "";
-  const keys = ["thumbnailUrl", "thumbnail", "poster", "posterUrl", "poster_path", "cover", "coverUrl", "image", "img", "src"];
-  for (const key of keys) {
-    const values = readAllStrings(object[key], []);
-    for (const value of values) {
-      if (value) return value;
-    }
-  }
-  return "";
-}
-
-function readImages(object) {
-  if (!object || typeof object !== "object") return [];
-  const keys = ["thumbnailUrl", "thumbnail", "poster", "posterUrl", "poster_path", "cover", "coverUrl", "image", "images", "img", "src"];
-  const out = [];
-  for (const key of keys) {
-    readAllStrings(object[key], out);
-  }
-  return unique(out);
-}
-
-function unique(values) {
-  const seen = new Set();
-  const out = [];
-  for (const value of values || []) {
-    const text = getText(value);
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
-  }
-  return out;
-}
-
-function sliceBalancedJson(text, start) {
-  const source = String(text || "");
-  const open = source.charAt(start);
-  const close = open === "{" ? "}" : open === "[" ? "]" : "";
-  if (!close) return "";
-
-  let depth = 0;
-  let inString = false;
-  let quote = "";
-  let escaped = false;
-
-  for (let i = start; i < source.length; i++) {
-    const ch = source.charAt(i);
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === quote) {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (ch === "\"" || ch === "'") {
-      inString = true;
-      quote = ch;
-      continue;
-    }
-    if (ch === open) depth++;
-    if (ch === close) depth--;
-    if (depth === 0) return source.slice(start, i + 1);
-  }
-  return "";
-}
-
-function safeJsonParse(text) {
-  try {
-    return JSON.parse(decodeHtml(text));
-  } catch (e) {
-    return null;
-  }
-}
-
-function extractJsonPayloads(html) {
-  const payloads = [];
-  const source = String(html || "");
-  const scriptRe = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
-  let match;
-
-  while ((match = scriptRe.exec(source)) !== null) {
-    const attrs = match[1] || "";
-    const body = match[2] || "";
-    const type = extractAttr(" " + attrs, "type").toLowerCase();
-    const id = extractAttr(" " + attrs, "id").toLowerCase();
-
-    if (type.indexOf("ld+json") >= 0 || id === "__next_data__") {
-      const parsed = safeJsonParse(body);
-      if (parsed) payloads.push(parsed);
-      continue;
-    }
-
-    if (!/"(?:url|href|thumbnail|poster|cover|videos|items?)"/i.test(body)) continue;
-    const firstObject = body.indexOf("{");
-    const firstArray = body.indexOf("[");
-    let start = -1;
-    if (firstObject >= 0 && firstArray >= 0) start = Math.min(firstObject, firstArray);
-    else start = Math.max(firstObject, firstArray);
-    if (start < 0) continue;
-
-    const jsonText = sliceBalancedJson(body, start);
-    const parsed = jsonText ? safeJsonParse(jsonText) : null;
-    if (parsed) payloads.push(parsed);
-  }
-
-  return payloads;
-}
-
-function mapJsonObjectToRawItem(object, baseUrl) {
-  if (!object || typeof object !== "object") return null;
-
-  const title = normalizeSpace(readFirstString(object, [
-    "title", "name", "headline", "videoTitle", "displayTitle", "code", "number"
-  ]));
-  const href = readFirstString(object, [
-    "url", "href", "link", "permalink", "detailUrl", "watchUrl", "path", "slug"
-  ]);
-  if (!title || !href || !isLikelyPageHref(href)) return null;
-
-  const url = toAbsoluteUrl(href, baseUrl);
-  if (!url || isMediaUrl(url) || isImageUrl(url)) return null;
-
-  const image = readImage(object);
-  return {
-    title,
-    url,
-    posterPath: image ? toAbsoluteUrl(image, baseUrl) : "",
-    backdropPath: image ? toAbsoluteUrl(image, baseUrl) : "",
-    description: normalizeSpace(readFirstString(object, ["description", "summary", "overview"])),
-    releaseDate: normalizeSpace(readFirstString(object, ["datePublished", "uploadDate", "releaseDate", "createdAt"])),
-    durationText: normalizeDuration(readFirstString(object, ["duration", "durationText", "length"]))
-  };
-}
-
-function collectJsonItems(value, baseUrl, out, depth) {
-  if (depth > 9 || value === null || value === undefined) return out;
-  if (Array.isArray(value)) {
-    for (const item of value) collectJsonItems(item, baseUrl, out, depth + 1);
-    return out;
-  }
-  if (typeof value !== "object") return out;
-
-  const direct = mapJsonObjectToRawItem(value, baseUrl);
-  if (direct) out.push(direct);
-
-  for (const key of Object.keys(value)) {
-    collectJsonItems(value[key], baseUrl, out, depth + 1);
-  }
-  return out;
-}
-
-function extractJsonItems(html, baseUrl) {
-  const items = [];
-  const payloads = extractJsonPayloads(html);
-  for (const payload of payloads) {
-    collectJsonItems(payload, baseUrl, items, 0);
-  }
-  return items;
-}
-
-function extractImageFromFragment(fragment, baseUrl) {
-  const img = String(fragment || "").match(/<img\b([^>]*)>/i);
-  if (img && img[1]) {
-    const src = firstAttr(" " + img[1], ["data-src", "data-original", "data-lazy-src", "src", "poster"]);
-    if (src) return toAbsoluteUrl(src, baseUrl);
-  }
-  const source = String(fragment || "").match(/<source\b([^>]*)>/i);
-  if (source && source[1]) {
-    const src = firstAttr(" " + source[1], ["src", "data-src"]);
-    if (src && isImageUrl(src)) return toAbsoluteUrl(src, baseUrl);
-  }
-  return "";
-}
-
-function extractTitleFromAnchor(attrs, inner) {
-  const title = firstAttr(" " + attrs, ["title", "aria-label"]);
-  if (title) return normalizeSpace(title);
-  const img = String(inner || "").match(/<img\b([^>]*)>/i);
-  if (img && img[1]) {
-    const imgTitle = firstAttr(" " + img[1], ["alt", "title"]);
-    if (imgTitle) return normalizeSpace(imgTitle);
-  }
-  return normalizeSpace(stripTags(inner));
-}
-
-function extractAnchorItems(html, baseUrl) {
-  const items = [];
-  const seen = new Set();
-  const anchorRe = /<a\b([^>]*\shref\s*=\s*["'][^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
-  let match;
-
-  while ((match = anchorRe.exec(String(html || ""))) !== null) {
-    const attrs = match[1] || "";
-    const inner = match[2] || "";
-    const href = extractAttr(" " + attrs, "href");
-    if (!isLikelyPageHref(href)) continue;
-
-    const url = toAbsoluteUrl(href, baseUrl);
-    if (!url || seen.has(url)) continue;
-
-    const posterPath = extractImageFromFragment(inner, baseUrl);
-    const title = extractTitleFromAnchor(attrs, inner);
-    if (!title || (!posterPath && !extractSearchCode(title))) continue;
-
-    seen.add(url);
-    items.push({
-      title,
-      url,
-      posterPath,
-      backdropPath: posterPath,
-      previewUrl: toAbsoluteUrl(firstAttr(" " + attrs + " " + inner, ["data-preview", "data-video", "data-src"]), baseUrl)
-    });
-  }
-
-  return items;
-}
-
-function buildVideoItem(raw, baseUrl) {
-  const url = toAbsoluteUrl(raw && raw.url, baseUrl);
-  const title = normalizeSpace(raw && raw.title);
-  if (!url || !title) return null;
-
-  const item = {
-    id: itemIdFromUrl(url, title),
-    type: "url",
-    title,
-    link: "detail:" + encodeURIComponent(url)
-  };
-
-  if (raw.posterPath) item.posterPath = toAbsoluteUrl(raw.posterPath, baseUrl);
-  if (raw.backdropPath) item.backdropPath = toAbsoluteUrl(raw.backdropPath, baseUrl);
-  if (raw.previewUrl) item.previewUrl = toAbsoluteUrl(raw.previewUrl, baseUrl);
-  if (raw.description) item.description = normalizeSpace(raw.description);
-  if (raw.releaseDate) item.releaseDate = normalizeSpace(raw.releaseDate);
-  if (raw.durationText) item.durationText = normalizeDuration(raw.durationText);
-  return item;
-}
-
-function dedupeVideoItems(items) {
-  const seen = new Set();
-  const out = [];
-  for (const item of items || []) {
-    if (!item || !item.title) continue;
-    const key = getText(item.link || item.id || item.title).toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-function parseListItems(html, baseUrl) {
-  const rawItems = []
-    .concat(extractJsonItems(html, baseUrl))
-    .concat(extractAnchorItems(html, baseUrl));
-
-  const items = rawItems
-    .map((item) => buildVideoItem(item, baseUrl))
-    .filter(Boolean);
-
-  return dedupeVideoItems(items).slice(0, 60);
-}
-
-function findJsonDetailObject(value, depth) {
-  if (depth > 8 || value === null || value === undefined) return null;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findJsonDetailObject(item, depth + 1);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (typeof value !== "object") return null;
-
-  const type = readFirstString(value, ["@type", "type"]);
-  const hasTitle = !!readFirstString(value, ["name", "title", "headline"]);
-  const hasDetail = !!readFirstString(value, ["description", "duration", "thumbnailUrl", "image", "contentUrl", "embedUrl"]);
-  if (hasTitle && (hasDetail || /video|movie/i.test(type))) return value;
-
-  for (const key of Object.keys(value)) {
-    const found = findJsonDetailObject(value[key], depth + 1);
-    if (found) return found;
-  }
-  return null;
-}
-
-function getJsonDetail(html) {
-  const payloads = extractJsonPayloads(html);
-  for (const payload of payloads) {
-    const found = findJsonDetailObject(payload, 0);
-    if (found) return found;
-  }
-  return null;
-}
-
-function normalizeDuration(value) {
-  const text = getText(value);
-  if (!text) return "";
-
-  const iso = text.match(/^P(?:T)?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
-  if (iso) {
-    const h = Number(iso[1] || 0);
-    const m = Number(iso[2] || 0);
-    const s = Number(iso[3] || 0);
-    if (h || m || s) {
-      const parts = h ? [h, m, s] : [m, s];
-      return parts.map((n, i) => i === 0 ? String(n) : String(n).padStart(2, "0")).join(":");
-    }
-  }
-
-  const readable = text.match(/(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?/i);
-  if (readable && (readable[1] || readable[2] || readable[3])) {
-    const h = Number(readable[1] || 0);
-    const m = Number(readable[2] || 0);
-    const s = Number(readable[3] || 0);
-    const parts = h ? [h, m, s] : [m, s];
-    return parts.map((n, i) => i === 0 ? String(n) : String(n).padStart(2, "0")).join(":");
-  }
-
-  return text;
-}
-
-function extractAllImages(html, baseUrl) {
-  const out = [];
-  const imgRe = /<img\b([^>]*)>/gi;
-  let match;
-  while ((match = imgRe.exec(String(html || ""))) !== null) {
-    const src = firstAttr(" " + match[1], ["data-src", "data-original", "data-lazy-src", "src", "poster"]);
-    if (src) out.push(toAbsoluteUrl(src, baseUrl));
-  }
-
-  const urlRe = /https?:\\?\/\\?\/[^"'\\\s<>]+?\.(?:jpg|jpeg|png|webp|avif)(?:\?[^"'\\\s<>]*)?/gi;
-  const normalized = String(html || "").replace(/\\\//g, "/");
-  while ((match = urlRe.exec(normalized)) !== null) {
-    out.push(toAbsoluteUrl(match[0], baseUrl));
-  }
-  return unique(out);
-}
-
-function idFromHref(href, baseUrl) {
-  const url = toAbsoluteUrl(href, baseUrl);
-  const path = urlPath(url);
-  return path || url;
-}
-
-function extractLinksByPath(html, baseUrl, fragments) {
-  const out = [];
-  const seen = new Set();
-  const anchorRe = /<a\b([^>]*\shref\s*=\s*["'][^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
-  let match;
-  while ((match = anchorRe.exec(String(html || ""))) !== null) {
-    const attrs = match[1] || "";
-    const inner = match[2] || "";
-    const href = extractAttr(" " + attrs, "href");
-    const path = urlPath(toAbsoluteUrl(href, baseUrl)).toLowerCase();
-    if (!fragments.some((fragment) => path.indexOf(fragment) >= 0)) continue;
-
-    const title = extractTitleFromAnchor(attrs, inner);
-    if (!title) continue;
-    const id = idFromHref(href, baseUrl);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push({ id, title });
-  }
-  return out;
-}
-
-function jsonGenres(detail) {
-  const out = [];
-  const values = detail && detail.genre;
-  readAllStrings(values, out);
-  return unique(out).map((title) => ({ id: "/zh/search", title }));
-}
-
-function jsonPeople(detail) {
-  const keys = ["actor", "actors", "director", "creator", "performer"];
-  const out = [];
-  for (const key of keys) {
-    const value = detail && detail[key];
-    const list = Array.isArray(value) ? value : value ? [value] : [];
-    for (const item of list) {
-      if (typeof item === "string") {
-        out.push({ id: item, title: item, role: key });
-      } else if (item && typeof item === "object") {
-        const title = readFirstString(item, ["name", "title"]);
-        if (!title) continue;
-        out.push({
-          id: readFirstString(item, ["url", "href", "sameAs"]) || title,
-          title,
-          avatar: readImage(item),
-          role: key
-        });
-      }
-    }
-  }
-  return out;
-}
-
-function extractMediaUrls(html, baseUrl) {
-  const source = String(html || "").replace(/\\\//g, "/").replace(/&amp;/g, "&");
-  const out = [];
-  const tagRe = /<(?:source|video)\b([^>]*)>/gi;
-  let match;
-
-  while ((match = tagRe.exec(source)) !== null) {
-    const src = firstAttr(" " + match[1], ["src", "data-src"]);
-    if (src && isMediaUrl(src)) out.push(toAbsoluteUrl(src, baseUrl));
-  }
-
-  const urlRe = /https?:\/\/[^"'\\\s<>]+?\.(?:m3u8|mp4)(?:\?[^"'\\\s<>]*)?/gi;
-  while ((match = urlRe.exec(source)) !== null) {
-    out.push(toAbsoluteUrl(match[0], baseUrl));
-  }
-
-  const kvRe = /(?:file|source|src|url|videoUrl|contentUrl)\s*[:=]\s*["']([^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)["']/gi;
-  while ((match = kvRe.exec(source)) !== null) {
-    out.push(toAbsoluteUrl(match[1], baseUrl));
-  }
-
-  return unique(out);
-}
-
-function parseDetailItem(html, detailUrl, baseUrl) {
-  const jsonDetail = getJsonDetail(html) || {};
-  const jsonRaw = mapJsonObjectToRawItem(jsonDetail, baseUrl) || {};
-  const metaImage = extractMeta(html, "og:image") || extractMeta(html, "twitter:image");
-  const images = unique(readImages(jsonDetail).concat([metaImage]).concat(extractAllImages(html, baseUrl)))
-    .filter(Boolean)
-    .map((url) => toAbsoluteUrl(url, baseUrl));
-  const mediaUrls = extractMediaUrls(html, baseUrl);
-  const title = normalizeSpace(
-    readFirstString(jsonDetail, ["name", "title", "headline"]) ||
-    extractMeta(html, "og:title") ||
-    extractTitleTag(html) ||
-    jsonRaw.title
-  );
-
-  if (!title) return null;
-
-  const posterPath = images[0] || "";
-  const genres = dedupeById(
-    jsonGenres(jsonDetail).concat(extractLinksByPath(html, baseUrl, ["/genre", "/genres", "/tag", "/tags", "/category"]))
-  );
-  const peoples = dedupeById(
-    jsonPeople(jsonDetail)
-      .map((person) => ({
-        id: person.id && /^https?:\/\//i.test(person.id) ? urlPath(person.id) : String(person.id || person.title),
-        title: person.title,
-        avatar: person.avatar ? toAbsoluteUrl(person.avatar, baseUrl) : "",
-        role: person.role || "actor"
-      }))
-      .concat(extractLinksByPath(html, baseUrl, ["/actor", "/actors", "/actress", "/actresses", "/star", "/stars"]).map((person) => ({
-        id: person.id,
-        title: person.title,
-        role: "actor"
-      })))
-  );
-
-  const relatedItems = parseListItems(html, baseUrl)
-    .filter((item) => decodeURIComponent(String(item.link || "")).indexOf(detailUrl) < 0)
-    .filter(isRelatedVideoItem)
-    .slice(0, 18);
-
-  const item = {
-    id: itemIdFromUrl(detailUrl, title),
-    type: "url",
-    title,
-    link: "detail:" + encodeURIComponent(detailUrl),
-    backdropPaths: images.slice(0, 12),
-    relatedItems
-  };
-
-  if (posterPath) {
-    item.posterPath = posterPath;
-    item.backdropPath = posterPath;
-  }
-  const description = normalizeSpace(
-    readFirstString(jsonDetail, ["description", "summary", "overview"]) ||
-    extractMeta(html, "description") ||
-    extractMeta(html, "og:description")
-  );
-  if (description) item.description = description;
-
-  const releaseDate = normalizeSpace(readFirstString(jsonDetail, ["datePublished", "uploadDate", "releaseDate", "createdAt"]));
-  if (releaseDate) item.releaseDate = releaseDate;
-
-  const durationText = normalizeDuration(readFirstString(jsonDetail, ["duration", "durationText", "length"]));
-  if (durationText) item.durationText = durationText;
-
-  if (genres.length) item.genreItems = genres;
-  if (peoples.length) item.peoples = peoples;
-  if (mediaUrls.length) {
-    item.videoUrl = mediaUrls[0];
-    item.playerType = "system";
-    item.trailers = [{ coverUrl: posterPath, url: mediaUrls[0] }];
-  }
-
-  return item;
-}
-
-function isRelatedVideoItem(item) {
-  const detailUrl = decodeDetailLink(item && item.link);
-  const path = urlPath(detailUrl).toLowerCase();
-  if (/\/(?:actor|actors|actress|actresses|star|stars|genre|genres|tag|tags|category|categories|search)(?:\/|$)/i.test(path)) {
-    return false;
-  }
-  return path.indexOf("/video") >= 0 || !!extractSearchCode(item && item.title, { allowPureNumeric: false });
-}
-
-function dedupeById(items) {
-  const seen = new Set();
-  const out = [];
-  for (const item of items || []) {
-    if (!item || !item.id || !item.title) continue;
-    const id = String(item.id);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(item);
-  }
-  return out;
-}
-
-function parseSearchForm(html, baseUrl) {
-  const formRe = /<form\b([^>]*)>([\s\S]*?)<\/form>/gi;
-  let fallback = null;
-  let match;
-
-  while ((match = formRe.exec(String(html || ""))) !== null) {
-    const attrs = match[1] || "";
-    const inner = match[2] || "";
-    const formText = (attrs + " " + inner).toLowerCase();
-    if (formText.indexOf("search") < 0 && formText.indexOf("keyword") < 0 && formText.indexOf("query") < 0) continue;
-
-    const action = extractAttr(" " + attrs, "action") || "/zh/search";
-    const inputRe = /<input\b([^>]*)>/gi;
-    let input;
-    let queryName = "";
-    while ((input = inputRe.exec(inner)) !== null) {
-      const inputAttrs = input[1] || "";
-      const type = (extractAttr(" " + inputAttrs, "type") || "text").toLowerCase();
-      const name = extractAttr(" " + inputAttrs, "name");
-      if (!name) continue;
-      if (type === "search" || /(?:q|s|keyword|query|search)/i.test(name)) {
-        queryName = name;
-        break;
-      }
-      if (!fallback) fallback = { url: toAbsoluteUrl(action, baseUrl), queryName: name };
-    }
-
-    if (queryName) return { url: toAbsoluteUrl(action, baseUrl), queryName };
-  }
-
-  return fallback;
-}
-
-function searchCandidates(baseUrl, form, keyword, page) {
-  const enc = encodeURIComponent(keyword);
-  const pageParam = Number(page || 1);
-  const candidates = [];
-  if (form && form.url && form.queryName) {
-    const query = {};
-    query[form.queryName] = keyword;
-    if (pageParam > 1) query.page = pageParam;
-    candidates.push({ url: form.url, query });
-  }
-
-  candidates.push(
-    { url: toAbsoluteUrl("/zh/search/" + enc, baseUrl), query: pageParam > 1 ? { page: pageParam } : {} },
-    { url: toAbsoluteUrl("/zh/search", baseUrl), query: { q: keyword, page: pageParam } },
-    { url: toAbsoluteUrl("/zh/search", baseUrl), query: { keyword: keyword, page: pageParam } },
-    { url: toAbsoluteUrl("/search/" + enc, baseUrl), query: pageParam > 1 ? { page: pageParam } : {} },
-    { url: toAbsoluteUrl("/search", baseUrl), query: { q: keyword, page: pageParam } },
-    { url: toAbsoluteUrl("/zh", baseUrl), query: { s: keyword, page: pageParam } },
-    { url: toAbsoluteUrl("/", baseUrl), query: { s: keyword, page: pageParam } }
-  );
-
-  const seen = new Set();
-  return candidates.filter((candidate) => {
-    const key = candidate.url + JSON.stringify(candidate.query || {});
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-async function loadList(params = {}) {
-  rememberParams(params);
-  const merged = mergeParams(params);
-  const base = normalizeBaseUrl(merged.baseUrl);
-  const page = Number(params.page || 1);
-  const path = getText(params.genreId || params.peopleId || params.path || "/zh");
-  const query = page > 1 ? { page } : {};
-  const url = toAbsoluteUrl(path, base);
-
-  const html = await requestPage(url, merged, base + "/", query);
-  if (!html) return [];
-
-  return parseListItems(html, base);
-}
-
-async function loadDetail(link) {
-  const raw = getText(link);
-  if (raw.indexOf("detail:") !== 0) return null;
-
-  const detailUrl = decodeURIComponent(raw.slice("detail:".length));
-  const params = mergeParams({});
-  const base = normalizeBaseUrl(params.baseUrl);
-  const html = await requestPage(detailUrl, params, base + "/");
-  if (!html) return null;
-
-  return parseDetailItem(html, detailUrl, base);
-}
-
-async function search(params = {}) {
-  rememberParams(params);
-  const keyword = getText(params.keyword);
-  if (!keyword) return [];
-
-  const merged = mergeParams(params);
-  const base = normalizeBaseUrl(merged.baseUrl);
-  const homeUrl = toAbsoluteUrl("/zh", base);
-  const homeHtml = await requestPage(homeUrl, merged, base + "/");
-  const form = homeHtml ? parseSearchForm(homeHtml, base) : null;
-  const candidates = searchCandidates(base, form, keyword, params.page || 1);
-
-  for (const candidate of candidates) {
-    const html = await requestPage(candidate.url, merged, homeUrl, candidate.query);
-    if (!html) continue;
-    const items = parseListItems(html, base);
-    if (items.length) return items;
-  }
-
-  return [];
-}
-
-function normalizeCode(value) {
-  return getText(value)
-    .toUpperCase()
-    .replace(/[\s_\-]+/g, "");
-}
-
-function extractSearchCode(text, options = {}) {
-  const allowPureNumeric = options.allowPureNumeric !== false;
-  let source = getText(text).toUpperCase();
-  if (!source) return "";
-
-  source = source.replace(/^[A-Z0-9]+(?:\.[A-Z0-9]+)+@/, "");
-  const normalized = source
+function extractSearchCode(text, options) {
+  const opts = options || {};
+  const allowPureNumeric = opts.allowPureNumeric !== false;
+  let s = getText(text).toUpperCase();
+  if (!s) return "";
+
+  s = safeDecodeURIComponent(s);
+  s = s.replace(/^[A-Z0-9]+(?:\.[A-Z0-9]+)+@/, "");
+
+  const normalized = s
     .replace(/\./g, " ")
     .replace(/_/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 
-  const specialPatterns = [
-    /\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i,
-    /\bCARIB[- ]?(\d{6,8})\b/i,
-    /\b1PONDO[- ]?(\d{6,8})\b/i,
-    /\bHEYZO[- ]?(\d{3,6})\b/i,
-    /\bT28[- ]?(\d{6,8})\b/i
-  ];
-  const prefixes = ["FC2", "CARIB", "1PONDO", "HEYZO", "T28"];
+  const knownMakerPattern = /\b(?:SONE|S2M|MIAA|SSNI|SNIS|IPX|IPZZ|SSIS|JUQ|MIDE|MIDV|STARS|ABW|RKI|DVAJ|WANZ|LULU|DLDSS|VRTM|SDMU|SDDE|MKMP|HMN|MUDR|ADN|CAWD|PPPE|PRED|MGR|SHKD|MXGS|FSDSS|JUL|KTB|MIAB|GVH|MIMK|JUY|JUTA|IDBD|HND|DASD|CLO|BF|HONB|ROE|CEMD|MIUM|NITR|RCTD|RCT|IPVR|MIBD|JUR|JURD|SOE|ORE|PYO|START|NSFS|ESD|GVG|REAL|LAF|SMD|MD|BAD|MOND|ARSO|MOCKY|FONE|GANA|MUKO|PAPA|RASH|TAMA|ZUKO|HEY|PACO|ABP|IPZ|SDAB|FSET|MOMJ)\s*[-_ ]?\d{2,6}[A-Z]?(?:[-_ ]?[A-Z]{0,4})?\b/i;
+  const makerMatch = normalized.match(knownMakerPattern);
+  if (makerMatch && makerMatch[0]) return formatMatchedCode(makerMatch[0]);
 
-  for (let i = 0; i < specialPatterns.length; i++) {
-    const match = normalized.match(specialPatterns[i]);
-    if (match) return prefixes[i] + "-" + match[1];
-  }
+  const fc2 = normalized.match(/\bFC2(?:[- ]?PPV)?[- ]?(\d{5,8})\b/i);
+  if (fc2) return "FC2-" + fc2[1];
 
-  const makerMatch = normalized.match(/\b(?:SONE|S2M|MIAA|SSNI|SNIS|IPX|IPZZ|SSIS|JUQ|MIDE|MIDV|STARS|ABW|RKI|DVAJ|WANZ|LULU|DLDSS|VRTM|SDMU|SDDE|MKMP|HMN|MUDR|ADN|CAWD|PPPE|PRED|MGR|SHKD|MXGS|FSDSS|JUL|KTB|MIAB|GVH|MIMK|JUY|JUTA|IDBD|HND|DASD|CLO|BF|HONB|ROE|CEMD|MIUM|NITR|RCTD|RCT|IPVR|MIBD|JUR|JURD|SOE|ORE|PYO|START|NSFS|ESD|GVG|REAL|LAF|SMD|MD|BAD|MOND|ARSO|MOCKY|FONE|GANA|MUKO|PAPA|RASH|TAMA|ZUKO|HEY|PACO|ABP|IPZ|SDAB|FSET|MOMJ)\s*[-_ ]?\d{2,6}[A-Z]?(?:[-_ ]?[A-Z]{0,4})?\b/i);
-  if (makerMatch && makerMatch[0]) {
-    return makerMatch[0].replace(/\s+/g, "").replace(/_/g, "-").replace(/-+/g, "-").toUpperCase();
-  }
+  const carib = normalized.match(/\bCARIB[- ]?(\d{6,8})\b/i);
+  if (carib) return "CARIB-" + carib[1];
 
-  const genericMatch = normalized.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10})[A-Z]?\b/);
-  if (genericMatch) return genericMatch[1] + "-" + genericMatch[2];
+  const pondo = normalized.match(/\b1PONDO[- ]?(\d{6,8})\b/i);
+  if (pondo) return "1PONDO-" + pondo[1];
+
+  const heyzo = normalized.match(/\bHEYZO[- ]?(\d{3,6})\b/i);
+  if (heyzo) return "HEYZO-" + heyzo[1];
+
+  const t28 = normalized.match(/\bT28[- ]?(\d{6,8})\b/i);
+  if (t28) return "T28-" + t28[1];
+
+  const generic = normalized.match(/\b([A-Z]{2,15})\s*[-_ ]?\s*(\d{2,10}[A-Z]?)\b/i);
+  if (generic) return generic[1].toUpperCase() + "-" + generic[2].toUpperCase();
 
   if (allowPureNumeric) {
-    const numMatch = normalized.match(/\b(\d{4,8})\b/);
-    if (numMatch) return numMatch[1];
+    const num = normalized.match(/\b(\d{5,8})\b/);
+    if (num) return num[1];
   }
 
   return "";
 }
 
 function collectStringValues(value, depth, out, visited) {
-  const results = out || [];
+  const list = out || [];
   const seen = visited || new Set();
-  if (value === null || value === undefined || depth > 5) return results;
+  const level = depth || 0;
+  if (value === null || value === undefined || level > 5) return list;
 
-  if (typeof value === "string" || typeof value === "number") {
-    const text = getText(value);
-    if (text) results.push(text);
-    return results;
+  const valueType = typeof value;
+  if (valueType === "string" || valueType === "number") {
+    const text = String(value).trim();
+    if (text) list.push(text);
+    return list;
   }
-  if (typeof value !== "object") return results;
-  if (seen.has(value)) return results;
+
+  if (valueType !== "object") return list;
+  if (seen.has(value)) return list;
   seen.add(value);
 
   if (Array.isArray(value)) {
-    for (const item of value) collectStringValues(item, depth + 1, results, seen);
-    return results;
+    for (const item of value) collectStringValues(item, level + 1, list, seen);
+    return list;
   }
 
   for (const key of Object.keys(value)) {
-    collectStringValues(value[key], depth + 1, results, seen);
+    collectStringValues(value[key], level + 1, list, seen);
   }
-  return results;
+
+  return list;
 }
 
-function extractCodeFromParams(params = {}) {
+function extractCodeFromParams(params) {
+  const p = params || {};
   const candidates = [
-    params.code,
-    params.videoId,
-    params.number,
-    params.id,
-    params.title,
-    params.name,
-    params.fileName,
-    params.filename,
-    params.file_name,
-    params.path,
-    params.filePath,
-    params.file_path,
-    params.mediaPath,
-    params.media_path,
-    params.itemPath,
-    params.item_path,
-    params.localPath,
-    params.local_path,
-    params.originalFilename,
-    params.originalFileName,
-    params.originalTitle,
-    params.originalName,
-    params.episodeName,
-    params.description,
-    params.genreTitle,
-    params.overview,
-    params.seriesName,
-    params.link,
-    params.url,
-    params.videoUrl,
-    params.playUrl,
-    params.streamUrl
+    p.code,
+    p.videoId,
+    p.number,
+    p.id,
+    p.title,
+    p.name,
+    p.fileName,
+    p.filename,
+    p.file_name,
+    p.path,
+    p.filePath,
+    p.file_path,
+    p.mediaPath,
+    p.media_path,
+    p.itemPath,
+    p.item_path,
+    p.localPath,
+    p.local_path,
+    p.originalFilename,
+    p.originalFileName,
+    p.originalTitle,
+    p.originalName,
+    p.episodeName,
+    p.description,
+    p.genreTitle,
+    p.overview,
+    p.seriesName,
+    p.link,
+    p.url,
+    p.videoUrl,
+    p.playUrl,
+    p.streamUrl,
+    p.detailUrl
   ];
 
-  for (const container of [params.tmdbInfo, params.info, params.mediaSource]) {
+  for (const container of [p.tmdbInfo, p.info, p.mediaSource]) {
     if (!container) continue;
     candidates.push(
       container.title,
@@ -1114,10 +255,17 @@ function extractCodeFromParams(params = {}) {
     );
   }
 
-  if (Array.isArray(params.mediaSources)) {
-    for (const source of params.mediaSources) {
+  if (Array.isArray(p.mediaSources)) {
+    for (const source of p.mediaSources) {
       if (!source) continue;
-      candidates.push(source.name, source.fileName, source.filename, source.path, source.url, source.streamUrl);
+      candidates.push(
+        source.name,
+        source.fileName,
+        source.filename,
+        source.path,
+        source.url,
+        source.streamUrl
+      );
     }
   }
 
@@ -1126,7 +274,7 @@ function extractCodeFromParams(params = {}) {
     if (code) return code;
   }
 
-  const allStrings = collectStringValues(params, 0, [], new Set());
+  const allStrings = collectStringValues(p);
   for (const value of allStrings) {
     const code = extractSearchCode(value, { allowPureNumeric: false });
     if (code) return code;
@@ -1135,63 +283,483 @@ function extractCodeFromParams(params = {}) {
   return "";
 }
 
-function decodeDetailLink(link) {
-  const value = getText(link);
-  if (value.indexOf("detail:") !== 0) return "";
-  return decodeURIComponent(value.slice("detail:".length));
+function buildHeaders(params, referer, extra) {
+  const base = normalizeBaseUrl(params && params.baseUrl);
+  const headers = {
+    "User-Agent": getText(params && params.userAgent) || UA,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": referer || base + "/"
+  };
+
+  const cookie = normalizeCookie(params && params.cookie);
+  if (cookie) headers["Cookie"] = cookie;
+
+  return Object.assign(headers, extra || {});
 }
 
-function streamHeaders(mediaUrl, detailUrl, params) {
+async function fetchHtml(url, params, options) {
+  const opts = options || {};
+  const absoluteUrl = toAbsoluteUrl(url, params && params.baseUrl);
+  const requestOptions = {
+    headers: buildHeaders(params, opts.referer, opts.headers),
+    timeout: opts.timeout || REQUEST_TIMEOUT
+  };
+  if (opts.params) requestOptions.params = opts.params;
+
+  const resp = await Widget.http.get(absoluteUrl, requestOptions);
+  if (!resp) return { status: 0, html: "", headers: {}, url: absoluteUrl };
+
+  const status = Number(resp.statusCode || resp.status || 200);
   return {
-    "Referer": detailUrl || normalizeBaseUrl(params && params.baseUrl) + "/",
-    "User-Agent": getText(params && params.userAgent) || JAVMENU_DEFAULT_UA,
-    "Accept": "*/*"
+    status,
+    html: String(resp.data || ""),
+    headers: resp.headers || {},
+    url: absoluteUrl
   };
 }
 
-function buildStreamItem(mediaUrl, detailUrl, code, params) {
-  const isHls = /\.m3u8(?:[?#].*)?$/i.test(mediaUrl);
-  return {
-    name: "JAVMenu " + (isHls ? "HLS" : "MP4"),
-    description: "Code: " + (code || "unknown") + "\nSource: JAVMenu\nDetail: " + detailUrl,
-    url: mediaUrl,
-    customHeaders: streamHeaders(mediaUrl, detailUrl, params)
-  };
+function getHeader(headers, name) {
+  if (!headers) return "";
+  const target = String(name || "").toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (String(key).toLowerCase() === target) return String(headers[key] || "");
+  }
+  return "";
 }
 
-async function findDetailForCode(code, params) {
-  const results = await search(Object.assign({}, params, { keyword: code, page: 1 }));
-  if (!results.length) return "";
+function isBlockedPage(resp) {
+  const html = String((resp && resp.html) || "");
+  const lower = html.toLowerCase();
+  return (
+    Number(resp && resp.status) === 403 ||
+    /challenge/i.test(getHeader(resp && resp.headers, "cf-mitigated")) ||
+    lower.indexOf("just a moment") >= 0 ||
+    lower.indexOf("cf-browser-verification") >= 0 ||
+    lower.indexOf("challenges.cloudflare.com") >= 0 ||
+    lower.indexOf("cf-chl") >= 0
+  );
+}
 
-  const normalized = normalizeCode(code);
-  const exact = results.find((item) => normalizeCode(item.title).indexOf(normalized) >= 0) || results[0];
-  return decodeDetailLink(exact.link);
+function isLikelyHtmlPageUrl(url) {
+  const value = getText(url);
+  if (!value) return false;
+  if (/^(?:#|javascript:|mailto:|magnet:)/i.test(value)) return false;
+  if (/\.(?:jpg|jpeg|png|webp|gif|avif|css|js|json|xml|m3u8|mp4|torrent)(?:[?#].*)?$/i.test(value)) return false;
+  return true;
+}
+
+function extractCodeFromJavMenuLink(link) {
+  const href = safeDecodeURIComponent(decodeHtml(link)).split("?")[0].split("#")[0];
+  const parts = href.split("/").filter(Boolean);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const code = extractSearchCode(parts[i].replace(/-/g, " "), { allowPureNumeric: true });
+    if (code) return code;
+  }
+  return "";
+}
+
+function parseSearchResults(html, targetCode, baseUrl) {
+  const target = normalizeCode(targetCode);
+  const results = [];
+  const seen = new Set();
+  let match;
+  const linkRe = /<a\b([^>]*href\s*=\s*["'][^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
+
+  while ((match = linkRe.exec(String(html || ""))) !== null) {
+    const attrs = match[1] || "";
+    const body = match[2] || "";
+    const href = extractAttr(attrs, "href");
+    if (!isLikelyHtmlPageUrl(href)) continue;
+
+    const link = toAbsoluteUrl(href, baseUrl);
+    if (!link || seen.has(link)) continue;
+
+    const imgTitle = extractAttr(body, "title") || extractAttr(body, "alt");
+    const attrTitle = extractAttr(attrs, "title") || extractAttr(attrs, "aria-label");
+    const text = stripTags(body);
+    const code = extractCodeFromJavMenuLink(link) ||
+      extractSearchCode(attrTitle, { allowPureNumeric: true }) ||
+      extractSearchCode(imgTitle, { allowPureNumeric: true }) ||
+      extractSearchCode(text, { allowPureNumeric: true });
+
+    if (!code || normalizeCode(code) !== target) continue;
+
+    seen.add(link);
+    results.push({
+      code,
+      link,
+      title: attrTitle || imgTitle || text || code
+    });
+  }
+
+  return results;
+}
+
+function htmlLooksLikeDetail(html, code) {
+  const body = String(html || "");
+  if (!body) return false;
+  if (normalizeCode(body).indexOf(normalizeCode(code)) >= 0) return true;
+  return extractMagnetUrls(body).length > 0;
+}
+
+function isSearchResponseUrl(url) {
+  return /\/search(?:\/|$)|[?&](?:q|s|keyword)=/i.test(String(url || ""));
+}
+
+function findParamDetailUrl(params, code) {
+  const base = normalizeBaseUrl(params && params.baseUrl);
+  const strings = collectStringValues(params || {});
+  const target = normalizeCode(code);
+
+  for (const value of strings) {
+    const text = getText(value);
+    if (!/^https?:\/\//i.test(text)) continue;
+    if (text.indexOf(base) !== 0 && text.indexOf("javmenu.") < 0) continue;
+    if (!isLikelyHtmlPageUrl(text)) continue;
+    if (target && normalizeCode(text).indexOf(target) < 0) continue;
+    return text;
+  }
+
+  return "";
+}
+
+function buildDetailCandidates(code, baseUrl) {
+  const slug = code.toLowerCase();
+  const compact = normalizeCode(code).toLowerCase();
+  return [
+    "/zh/video/" + slug,
+    "/zh/videos/" + slug,
+    "/zh/v/" + slug,
+    "/zh/" + slug,
+    "/video/" + slug,
+    "/videos/" + slug,
+    "/v/" + slug,
+    "/" + slug,
+    "/zh/video/" + compact,
+    "/video/" + compact
+  ].map(function (path) {
+    return toAbsoluteUrl(path, baseUrl);
+  });
+}
+
+function buildSearchCandidates(code, baseUrl) {
+  const encoded = encodeURIComponent(code);
+  return [
+    { url: toAbsoluteUrl("/zh/search/" + encoded, baseUrl) },
+    { url: toAbsoluteUrl("/search/" + encoded, baseUrl) },
+    { url: toAbsoluteUrl("/zh/search", baseUrl), params: { q: code } },
+    { url: toAbsoluteUrl("/zh/search", baseUrl), params: { keyword: code } },
+    { url: toAbsoluteUrl("/search", baseUrl), params: { q: code } },
+    { url: toAbsoluteUrl("/search", baseUrl), params: { keyword: code } },
+    { url: toAbsoluteUrl("/zh", baseUrl), params: { s: code } },
+    { url: toAbsoluteUrl("/", baseUrl), params: { s: code } }
+  ];
+}
+
+async function pickDetailFromResponse(resp, code, params, referer) {
+  if (isBlockedPage(resp)) return { blocked: true, detail: null };
+  if (!resp || resp.status >= 400 || !resp.html) return { blocked: false, detail: null };
+
+  if (isSearchResponseUrl(resp.url)) {
+    const searchMatches = parseSearchResults(resp.html, code, params.baseUrl);
+    for (const item of searchMatches) {
+      const detailResp = await fetchHtml(item.link, params, { referer: referer || resp.url });
+      if (isBlockedPage(detailResp)) return { blocked: true, detail: null };
+      if (detailResp.status >= 400) continue;
+      if (!htmlLooksLikeDetail(detailResp.html, code)) continue;
+
+      return {
+        blocked: false,
+        detail: {
+          code: item.code || code,
+          detailUrl: detailResp.url,
+          html: detailResp.html
+        }
+      };
+    }
+
+    return { blocked: false, detail: null };
+  }
+
+  if (htmlLooksLikeDetail(resp.html, code)) {
+    return {
+      blocked: false,
+      detail: {
+        code,
+        detailUrl: resp.url,
+        html: resp.html
+      }
+    };
+  }
+
+  const matches = parseSearchResults(resp.html, code, params.baseUrl);
+  if (!matches.length) return { blocked: false, detail: null };
+
+  for (const item of matches) {
+    const detailResp = await fetchHtml(item.link, params, { referer: referer || resp.url });
+    if (isBlockedPage(detailResp)) return { blocked: true, detail: null };
+    if (detailResp.status >= 400) continue;
+    if (!htmlLooksLikeDetail(detailResp.html, code)) continue;
+
+    return {
+      blocked: false,
+      detail: {
+        code: item.code || code,
+        detailUrl: detailResp.url,
+        html: detailResp.html
+      }
+    };
+  }
+
+  return { blocked: false, detail: null };
+}
+
+async function findDetailByCode(code, params) {
+  const base = normalizeBaseUrl(params && params.baseUrl);
+  const directFromParams = findParamDetailUrl(params, code);
+  if (directFromParams) {
+    console.log(LOG_PREFIX, "使用参数中的 JAVMenu 详情页:", directFromParams);
+    const resp = await fetchHtml(directFromParams, params, { referer: base + "/" });
+    const picked = await pickDetailFromResponse(resp, code, params, base + "/");
+    if (picked.blocked || picked.detail) return picked;
+  }
+
+  const detailCandidates = buildDetailCandidates(code, base);
+  for (const url of detailCandidates) {
+    console.log(LOG_PREFIX, "尝试详情页:", url);
+    const resp = await fetchHtml(url, params, { referer: base + "/" });
+    const picked = await pickDetailFromResponse(resp, code, params, base + "/");
+    if (picked.blocked || picked.detail) return picked;
+  }
+
+  const searchCandidates = buildSearchCandidates(code, base);
+  for (const candidate of searchCandidates) {
+    console.log(LOG_PREFIX, "尝试搜索:", candidate.url);
+    const resp = await fetchHtml(candidate.url, params, {
+      referer: base + "/",
+      params: candidate.params
+    });
+    const picked = await pickDetailFromResponse(resp, code, params, candidate.url);
+    if (picked.blocked || picked.detail) return picked;
+  }
+
+  return { blocked: false, detail: null };
+}
+
+function extractMagnetHash(url) {
+  const match = String(url || "").match(/(?:btih|btmh):([a-z0-9]{32,64})/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function extractSize(text) {
+  const match = String(text || "").match(/\b(\d+(?:\.\d+)?\s*(?:GB|G|MB|M|GiB|MiB))\b/i);
+  return match ? match[1].replace(/\s+/g, " ").toUpperCase() : "";
+}
+
+function extractDate(text) {
+  const match = String(text || "").match(/\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2})\b/);
+  return match ? match[1].replace(/[/.]/g, "-") : "";
+}
+
+function normalizeMagnet(raw) {
+  let magnet = decodeHtml(getText(raw));
+  magnet = magnet.replace(/\\u003[dD]/g, "=").replace(/\\u0026/g, "&");
+  if (/^magnet%3A/i.test(magnet)) magnet = safeDecodeURIComponent(magnet);
+  if (/^magnet:/i.test(magnet)) return magnet.replace(/&amp;/g, "&");
+
+  const encoded = magnet.match(/magnet%3A%3Fxt%3Durn%3A[^"'<>\s]+/i);
+  if (encoded) return safeDecodeURIComponent(encoded[0]).replace(/&amp;/g, "&");
+
+  return "";
+}
+
+function extractMagnetUrls(html) {
+  const source = decodeHtml(String(html || ""))
+    .replace(/\\u003[dD]/g, "=")
+    .replace(/\\u0026/g, "&")
+    .replace(/\\\//g, "/");
+  const urls = [];
+  let match;
+
+  const directRe = /magnet:\?xt=urn:[^"'<>\s]+/gi;
+  while ((match = directRe.exec(source)) !== null) {
+    urls.push(normalizeMagnet(match[0]));
+  }
+
+  const encodedRe = /magnet%3A%3Fxt%3Durn%3A[^"'<>\s]+/gi;
+  while ((match = encodedRe.exec(source)) !== null) {
+    urls.push(normalizeMagnet(match[0]));
+  }
+
+  const attrs = ["href", "data-clipboard-text", "data-magnet", "data-url"];
+  for (const attr of attrs) {
+    const re = new RegExp("\\b" + attr + "\\s*=\\s*([\"'])([\\s\\S]*?)\\1", "gi");
+    while ((match = re.exec(source)) !== null) {
+      const magnet = normalizeMagnet(match[2]);
+      if (magnet) urls.push(magnet);
+    }
+  }
+
+  const seen = new Set();
+  const out = [];
+  for (const url of urls) {
+    const key = extractMagnetHash(url) || url;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(url);
+  }
+  return out;
+}
+
+function parseMagnetRows(html) {
+  const rows = [];
+  let match;
+  const rowRe = /<(?:tr|li)\b[\s\S]*?<\/(?:tr|li)>/gi;
+  while ((match = rowRe.exec(String(html || ""))) !== null) {
+    if (/magnet(?:\:|%3A)/i.test(match[0])) rows.push(match[0]);
+  }
+
+  if (rows.length) return rows;
+
+  const text = String(html || "");
+  const magnetRe = /magnet(?::|%3A)(?:\?|%3F)xt(?:=|%3D)urn(?:\:|%3A)[^"'<>\s]+/gi;
+  while ((match = magnetRe.exec(text)) !== null) {
+    const start = Math.max(0, match.index - 300);
+    const end = Math.min(text.length, match.index + match[0].length + 300);
+    rows.push(text.slice(start, end));
+  }
+
+  return rows;
+}
+
+function parseMagnetItems(html, code, detailUrl) {
+  const rows = parseMagnetRows(html);
+  const seen = new Set();
+  const items = [];
+
+  for (const row of rows) {
+    const magnets = extractMagnetUrls(row);
+    for (const magnet of magnets) {
+      const key = extractMagnetHash(magnet) || magnet;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+
+      const rowText = stripTags(row + " " + safeDecodeURIComponent(magnet));
+      const size = extractSize(rowText);
+      const date = extractDate(rowText);
+      const hasSubtitle = /字幕|中文字幕|subtitle|\bsub\b/i.test(rowText);
+      const hasHd = /高清|\bHD\b|1080|720|2160|4K/i.test(rowText);
+      const tags = [];
+
+      if (hasSubtitle) tags.push("[字幕]");
+      if (hasHd) tags.push("[高清]");
+
+      items.push({
+        name: (tags.join("") + code + (size ? " " + size : "")).trim(),
+        description:
+          "来源：JAVMenu\n" +
+          "类型：Magnet\n" +
+          "番号：" + (code || "未知") + "\n" +
+          "大小：" + (size || "未知") + "\n" +
+          "日期：" + (date || "未知") + "\n" +
+          "字幕：" + (hasSubtitle ? "是" : "未知") + "\n" +
+          "高清：" + (hasHd ? "是" : "未知") + "\n" +
+          "详情页：" + detailUrl,
+        url: magnet
+      });
+    }
+  }
+
+  return items;
+}
+
+function parseMagnetPageLinks(html, baseUrl) {
+  const links = [];
+  const seen = new Set();
+  let match;
+  const linkRe = /<a\b([^>]*href\s*=\s*["'][^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
+
+  while ((match = linkRe.exec(String(html || ""))) !== null) {
+    const attrs = match[1] || "";
+    const body = match[2] || "";
+    const href = extractAttr(attrs, "href");
+    if (!isLikelyHtmlPageUrl(href)) continue;
+
+    const text = (extractAttr(attrs, "title") + " " + stripTags(body) + " " + href).toLowerCase();
+    if (!/(magnet|torrent|download|bt|磁力|下载|種子|种子)/i.test(text)) continue;
+
+    const url = toAbsoluteUrl(href, baseUrl);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    links.push(url);
+  }
+
+  return links.slice(0, 5);
+}
+
+async function fetchMagnets(detail, params) {
+  let items = parseMagnetItems(detail.html, detail.code, detail.detailUrl);
+  if (items.length) return items;
+
+  const base = normalizeBaseUrl(params && params.baseUrl);
+  const links = parseMagnetPageLinks(detail.html, base);
+  const seen = new Set();
+
+  for (const link of links) {
+    if (seen.has(link)) continue;
+    seen.add(link);
+
+    const resp = await fetchHtml(link, params, { referer: detail.detailUrl });
+    if (isBlockedPage(resp) || resp.status >= 400) continue;
+    items = items.concat(parseMagnetItems(resp.html, detail.code, detail.detailUrl));
+  }
+
+  const byHash = new Set();
+  return items.filter(function (item) {
+    const key = extractMagnetHash(item.url) || item.url;
+    if (!key || byHash.has(key)) return false;
+    byHash.add(key);
+    return true;
+  });
 }
 
 async function loadResource(params = {}) {
-  rememberParams(params);
-  const code = extractCodeFromParams(params);
-  if (!code) {
-    console.log("[javmenu] no code found in params");
+  try {
+    const cookie = normalizeCookie(params.cookie);
+    if (!cookie) {
+      console.warn(LOG_PREFIX, "未配置 JAVMenu Cookie，无法通过 Cloudflare 验证，跳过匹配");
+      return [];
+    }
+
+    const normalizedParams = Object.assign({}, params, {
+      baseUrl: normalizeBaseUrl(params.baseUrl),
+      cookie
+    });
+
+    const code = extractCodeFromParams(normalizedParams);
+    if (!code) {
+      console.log(LOG_PREFIX, "当前视频信息中未找到番号，跳过 JAVMenu 匹配");
+      return [];
+    }
+
+    console.log(LOG_PREFIX, "提取到番号:", code);
+
+    const found = await findDetailByCode(code, normalizedParams);
+    if (found.blocked) {
+      console.warn(LOG_PREFIX, "JAVMenu Cookie 缺失或已失效：页面返回 Cloudflare 验证");
+      return [];
+    }
+    if (!found.detail) {
+      console.log(LOG_PREFIX, "未找到 JAVMenu 精确匹配:", code);
+      return [];
+    }
+
+    const magnets = await fetchMagnets(found.detail, normalizedParams);
+    console.log(LOG_PREFIX, "磁力资源数量:", magnets.length);
+    return magnets;
+  } catch (error) {
+    console.error(LOG_PREFIX, "loadResource 失败:", error.message || error);
     return [];
   }
-
-  const merged = mergeParams(params);
-  const base = normalizeBaseUrl(merged.baseUrl);
-  const detailUrl = await findDetailForCode(code, merged);
-  if (!detailUrl) {
-    console.log("[javmenu] no matching detail page:", code);
-    return [];
-  }
-
-  const html = await requestPage(detailUrl, merged, base + "/");
-  if (!html) return [];
-
-  const urls = extractMediaUrls(html, base);
-  if (!urls.length) {
-    console.log("[javmenu] no directly exposed media URLs:", detailUrl);
-    return [];
-  }
-
-  return urls.map((url) => buildStreamItem(url, detailUrl, code, merged));
 }
