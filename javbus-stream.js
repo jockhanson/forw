@@ -4,8 +4,9 @@ WidgetMetadata = {
   description: "通过番号匹配 JavBus 磁力资源",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.4.0",
+  version: "1.4.1",
   requiredVersion: "0.0.1",
+  detailCacheDuration: 60,
   globalParams: [
     {
       name: "cookie",
@@ -43,6 +44,7 @@ const PAN115_BASE = "https://115.com";
 const PAN115_SPACE_URL = PAN115_BASE + "/?ct=offline&ac=space";
 const PAN115_ADD_TASK_URL = PAN115_BASE + "/web/lixian/?ct=lixian&ac=add_task_url";
 const PAN115_PENDING_TTL = 5 * 60 * 1000;
+const RUNTIME_PARAMS_KEY = "javbus-stream.runtimeParams";
 
 function getText(value) {
   return String(value || "").trim();
@@ -115,6 +117,59 @@ function storeGetJSON(key, fallback) {
 
 function storeSetJSON(key, value) {
   storageSet(key, JSON.stringify(value));
+}
+
+function pickRuntimeParams(params) {
+  const p = params || {};
+  const keys = [
+    "cookie",
+    "pan115Cookie",
+    "cookie115",
+    "115Cookie",
+    "pan115_cookie",
+    "offlineCookie",
+    "code",
+    "videoId",
+    "number",
+    "id",
+    "vod_id",
+    "title",
+    "name",
+    "originalTitle",
+    "originalName",
+    "fileName",
+    "filename",
+    "description",
+    "episodeName",
+    "link",
+    "url",
+    "detailUrl",
+    "pageUrl",
+    "posterPath",
+    "coverUrl",
+    "backdropPath",
+    "previewUrl"
+  ];
+  const out = {};
+
+  for (const key of keys) {
+    if (p[key] === undefined || p[key] === null) continue;
+    const value = String(p[key]).trim();
+    if (value) out[key] = value;
+  }
+
+  return out;
+}
+
+function rememberRuntimeParams(params) {
+  const saved = storeGetJSON(RUNTIME_PARAMS_KEY, {});
+  const next = Object.assign({}, saved || {}, pickRuntimeParams(params));
+  if (Object.keys(next).length) storeSetJSON(RUNTIME_PARAMS_KEY, next);
+  return next;
+}
+
+function getRuntimeParams() {
+  return storeGetJSON(RUNTIME_PARAMS_KEY, {}) || {};
 }
 
 function getCookieValue(cookie, name) {
@@ -753,6 +808,20 @@ function buildCandidateDescription(code, candidate, submitted) {
   ].filter(Boolean).join("\n");
 }
 
+function buildStatusEpisodeItem(code, title, message) {
+  const dvdId = normalizePan115DvdId(code || "unknown");
+  return {
+    id: "javbus-magnet-status:" + dvdId + ":" + simpleHash(title + message),
+    type: "url",
+    mediaType: "movie",
+    title,
+    name: title,
+    description: message,
+    link: "magnet-status://" + dvdId,
+    playerType: "system"
+  };
+}
+
 function buildEpisodeItems(code, candidates) {
   const dvdId = normalizePan115DvdId(code);
   if (!dvdId || !candidates || !candidates.length) return [];
@@ -818,6 +887,35 @@ function findOfflineCandidate(info) {
   }
 
   return null;
+}
+
+function buildMagnetDetailItem(params, code, episodeItems) {
+  const p = params || {};
+  const dvdId = normalizePan115DvdId(code);
+  const title = getText(p.title || p.name || p.originalTitle || code || "JavBus 磁力候选");
+  const poster = getText(p.posterPath || p.coverUrl || p.backdropPath || p.previewUrl);
+  const link = getText(p.link || p.detailUrl || p.url || ("javbus-magnets://" + dvdId));
+  const items = episodeItems || [];
+
+  return {
+    id: "javbus-magnets:" + dvdId,
+    vod_id: "javbus-magnets:" + dvdId,
+    type: "detail",
+    mediaType: "movie",
+    title,
+    name: title,
+    originalTitle: code || title,
+    description: "JavBus 磁力候选，点击候选提交到 115 离线下载。",
+    link,
+    posterPath: poster,
+    coverUrl: poster,
+    backdropPath: poster,
+    previewUrl: poster,
+    playerType: "system",
+    episodeItems: items,
+    childItems: items,
+    relatedItems: items
+  };
 }
 
 function parseMagnetRows(html) {
@@ -1103,8 +1201,9 @@ async function handleOfflineSubmit(params, link) {
   return buildOfflineReceipt(link, false, "提交失败", (result && result.error) || "115 返回失败，请稍后重试。");
 }
 
-async function loadMagnetLinks(params = {}) {
+async function loadMagnetLinks(params = {}, options = {}) {
   try {
+    const includeStatus = !!(options && options.includeStatus);
     const code = extractCodeFromParams(params);
     if (!code) {
       console.log(LOG_PREFIX, "当前视频信息中未找到番号，跳过 JavBus 匹配");
@@ -1120,7 +1219,9 @@ async function loadMagnetLinks(params = {}) {
     const cookie = normalizeCookie(params.cookie || storageGet("javbus.cookie"));
     if (!cookie) {
       console.warn(LOG_PREFIX, "未配置 JavBus Cookie，无法通过年龄验证，跳过匹配");
-      return [];
+      return includeStatus
+        ? [buildStatusEpisodeItem(code, "JavBus磁力｜需要配置 Cookie", "请在本模块填写 JavBus Cookie，或先通过 JavBus 年龄验证后复制 Cookie。")]
+        : [];
     }
     cacheJavBusCookie(cookie);
     const requestParams = Object.assign({}, params, { cookie });
@@ -1128,37 +1229,64 @@ async function loadMagnetLinks(params = {}) {
     console.log(LOG_PREFIX, "提取到番号:", code);
 
     const found = await findDetailByCode(code, requestParams);
-    if (found.blocked) return [];
+    if (found.blocked) {
+      return includeStatus
+        ? [buildStatusEpisodeItem(code, "JavBus磁力｜年龄验证未通过", "JavBus 返回年龄验证页面，请更新 JavBus Cookie。")]
+        : [];
+    }
     if (!found.detail) {
       console.log(LOG_PREFIX, "未找到 JavBus 精确匹配:", code);
-      return [];
+      return includeStatus
+        ? [buildStatusEpisodeItem(code, "JavBus磁力｜未找到详情", "未在 JavBus 找到 " + code + " 的精确匹配。")]
+        : [];
     }
 
     const magnets = await fetchMagnets(found.detail, requestParams);
     console.log(LOG_PREFIX, "磁力资源数量:", magnets.length);
-    return magnets;
+    return magnets.length || !includeStatus
+      ? magnets
+      : [buildStatusEpisodeItem(code, "JavBus磁力｜暂无候选", "JavBus 暂未返回 " + code + " 的磁力候选。")];
   } catch (error) {
     console.error(LOG_PREFIX, "loadResource 失败:", error.message || error);
+    if (options && options.includeStatus) {
+      const code = extractCodeFromParams(params);
+      return [buildStatusEpisodeItem(code, "JavBus磁力｜加载失败", String(error.message || error || "未知错误"))];
+    }
     return [];
   }
 }
 
 async function loadResource(params = {}) {
-  resolvePan115Cookie(params);
+  const runtime = rememberRuntimeParams(params);
+  resolvePan115Cookie(runtime);
   const link = getText(params.link);
   if (link.indexOf("offline-submit://") === 0) {
     console.log(LOG_PREFIX, "检测到离线提交路由:", link.slice(0, 120));
-    const receipt = await handleOfflineSubmit(params, link);
+    const receipt = await handleOfflineSubmit(runtime, link);
     return [receipt];
   }
 
-  return loadMagnetLinks(params);
+  return loadMagnetLinks(runtime);
 }
 
 async function loadDetail(link, params = {}) {
   const target = getText(link);
+  const runtime = rememberRuntimeParams(Object.assign({}, getRuntimeParams(), params, target ? { link: target } : {}));
+
   if (target.indexOf("offline-submit://") === 0) {
-    return handleOfflineSubmit(params, target);
+    return handleOfflineSubmit(runtime, target);
   }
-  return null;
+
+  if (target.indexOf("magnet-status://") === 0) {
+    return buildOfflineReceipt(target, false, "JavBus磁力", "这是一条状态提示。请按提示配置 Cookie 或刷新详情页。");
+  }
+
+  const code = extractCodeFromParams(runtime);
+  if (!code) {
+    console.log(LOG_PREFIX, "loadDetail 未找到番号，无法构建 episodeItems");
+    return null;
+  }
+
+  const episodeItems = await loadMagnetLinks(runtime, { includeStatus: true });
+  return buildMagnetDetailItem(runtime, code, episodeItems);
 }
