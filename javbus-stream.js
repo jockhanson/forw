@@ -1,10 +1,10 @@
 WidgetMetadata = {
-  id: "javbus.stream",
+  id: "javbus-stream",
   title: "磁力链接",
   description: "通过番号匹配 JavBus 磁力资源",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.3.1",
+  version: "1.4.0",
   requiredVersion: "0.0.1",
   globalParams: [
     {
@@ -12,6 +12,12 @@ WidgetMetadata = {
       title: "JavBus Cookie",
       type: "input",
       description: "在浏览器通过 JavBus 年龄验证后，复制整段 Cookie 填入（含名）。"
+    },
+    {
+      name: "pan115Cookie",
+      title: "115 Cookie",
+      type: "input",
+      description: "115.com 登录后的完整 Cookie，用于点击磁力候选后提交离线任务。"
     }
   ],
   modules: [
@@ -33,6 +39,10 @@ const REQUEST_TIMEOUT = 15000;
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15";
 const LOG_PREFIX = "[javbus-stream]";
 const PAN115_MAGNET_CACHE_TTL = 3600 * 1000;
+const PAN115_BASE = "https://115.com";
+const PAN115_SPACE_URL = PAN115_BASE + "/?ct=offline&ac=space";
+const PAN115_ADD_TASK_URL = PAN115_BASE + "/web/lixian/?ct=lixian&ac=add_task_url";
+const PAN115_PENDING_TTL = 5 * 60 * 1000;
 
 function getText(value) {
   return String(value || "").trim();
@@ -73,6 +83,90 @@ function cacheJavBusCookie(cookie) {
       Widget.storage.set("javbus.cookie", cookie);
     }
   } catch (_) {}
+}
+
+function storageGet(key) {
+  try {
+    if (typeof Widget === "undefined" || !Widget.storage || typeof Widget.storage.get !== "function") return "";
+    return Widget.storage.get(key);
+  } catch (_) {
+    return "";
+  }
+}
+
+function storageSet(key, value) {
+  try {
+    if (typeof Widget === "undefined" || !Widget.storage || typeof Widget.storage.set !== "function") return;
+    Widget.storage.set(key, value);
+  } catch (error) {
+    console.warn(LOG_PREFIX, "storage set failed:", key, error.message || error);
+  }
+}
+
+function storeGetJSON(key, fallback) {
+  const raw = storageGet(key);
+  if (!raw) return fallback;
+  try {
+    return typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+function storeSetJSON(key, value) {
+  storageSet(key, JSON.stringify(value));
+}
+
+function getCookieValue(cookie, name) {
+  const target = String(name || "").toLowerCase();
+  const parts = String(cookie || "").split(";");
+  for (const part of parts) {
+    const trimmed = part.trim();
+    const idx = trimmed.indexOf("=");
+    if (idx < 0) continue;
+    const key = trimmed.slice(0, idx).trim().toLowerCase();
+    if (key === target) return trimmed.slice(idx + 1).trim();
+  }
+  return "";
+}
+
+function looksLikePan115Cookie(cookie) {
+  const text = String(cookie || "");
+  return !!(getCookieValue(text, "UID") || getCookieValue(text, "SEID") || getCookieValue(text, "CID"));
+}
+
+function cachePan115Cookie(cookie) {
+  const normalized = normalizeCookie(cookie);
+  if (normalized && looksLikePan115Cookie(normalized)) {
+    storageSet("pan115.cookie", normalized);
+  }
+}
+
+function resolvePan115Cookie(params) {
+  const p = params || {};
+  const direct = normalizeCookie(
+    p.pan115Cookie ||
+    p.cookie115 ||
+    p["115Cookie"] ||
+    p.pan115_cookie ||
+    p.offlineCookie
+  );
+
+  if (direct) {
+    cachePan115Cookie(direct);
+    return direct;
+  }
+
+  const cached = normalizeCookie(storageGet("pan115.cookie"));
+  if (cached) return cached;
+
+  const lastResort = normalizeCookie(p.cookie);
+  if (looksLikePan115Cookie(lastResort)) {
+    cachePan115Cookie(lastResort);
+    return lastResort;
+  }
+
+  return "";
 }
 
 function normalizeCode(value) {
@@ -563,6 +657,169 @@ function buildPan115OfflineLink(code, candidateId, magnet, title, size) {
   return "offline-submit://" + normalizePan115DvdId(code) + "?" + query.join("&");
 }
 
+function parseQueryString(query) {
+  const result = {};
+  String(query || "").split("&").forEach(function (pair) {
+    if (!pair) return;
+    const idx = pair.indexOf("=");
+    const key = idx >= 0 ? pair.slice(0, idx) : pair;
+    const value = idx >= 0 ? pair.slice(idx + 1) : "";
+    if (!key) return;
+    try {
+      result[key] = decodeURIComponent(value || "");
+    } catch (_) {
+      result[key] = value || "";
+    }
+  });
+  return result;
+}
+
+function parseOfflineSubmitLink(link) {
+  const rest = String(link || "").slice("offline-submit://".length);
+  const qIndex = rest.indexOf("?");
+  const rawDvdId = qIndex >= 0 ? rest.slice(0, qIndex) : rest;
+  const query = qIndex >= 0 ? parseQueryString(rest.slice(qIndex + 1)) : {};
+  let dvdId = rawDvdId || "";
+
+  try {
+    dvdId = decodeURIComponent(dvdId);
+  } catch (_) {}
+
+  const magnet = getText(query.magnet || query.maglink || query.url);
+  let candidateId = getText(query.cid || query.id || query.infoHash);
+  if (!candidateId && magnet) candidateId = extractMagnetHash(magnet) || simpleHash(magnet);
+
+  return {
+    dvdId: getText(query.dvd || query.code || dvdId).toLowerCase(),
+    candidateId,
+    magnet,
+    title: getText(query.title || query.name),
+    size: getText(query.size || query.sizeText),
+    sizeBytes: Number(query.sizeBytes || 0) || parseSizeBytes(query.size || ""),
+    source: getText(query.source || "javbus")
+  };
+}
+
+function formatSizeLabel(bytes) {
+  if (!bytes || bytes <= 0) return "";
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return gb.toFixed(gb >= 10 ? 1 : 2) + " GB";
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) return Math.round(mb) + " MB";
+  const kb = bytes / 1024;
+  if (kb >= 1) return Math.round(kb) + " KB";
+  return String(Math.round(bytes)) + " B";
+}
+
+function scoreCandidate(candidate) {
+  let score = 0;
+  const tags = candidate && candidate.tags ? candidate.tags : [];
+  if (tags.indexOf("cnsub") >= 0) score += 100;
+  if (tags.indexOf("hd") >= 0) score += 20;
+  if (tags.indexOf("4k") >= 0) score += 10;
+
+  const gb = Number(candidate && candidate.sizeBytes || 0) / (1024 * 1024 * 1024);
+  if (gb >= 0.3 && gb <= 15) score += 20;
+  if (gb > 30) score -= 50;
+  return score;
+}
+
+function tagText(tags) {
+  const list = tags || [];
+  let text = "";
+  if (list.indexOf("cnsub") >= 0) text += "｜中文字幕";
+  if (list.indexOf("hd") >= 0) text += "｜高清";
+  if (list.indexOf("4k") >= 0) text += "｜4K";
+  return text;
+}
+
+function buildCandidateDescription(code, candidate, submitted) {
+  const size = formatSizeLabel(candidate.sizeBytes) || candidate.size || "未知";
+  const status = submitted && submitted.ok
+    ? "状态：已提交到 115"
+    : submitted && submitted.ok === false
+      ? "状态：上次提交失败，点击可重试"
+      : "状态：点击确认后提交到 115 离线下载";
+
+  return [
+    status,
+    "来源：JavBus",
+    "番号：" + (code || candidate.dvdId || "未知"),
+    "大小：" + size,
+    "日期：" + (candidate.date || "未知"),
+    "字幕：" + ((candidate.tags || []).indexOf("cnsub") >= 0 ? "是" : "未知"),
+    "高清：" + ((candidate.tags || []).indexOf("hd") >= 0 ? "是" : "未知"),
+    candidate.detailUrl ? "详情页：" + candidate.detailUrl : ""
+  ].filter(Boolean).join("\n");
+}
+
+function buildEpisodeItems(code, candidates) {
+  const dvdId = normalizePan115DvdId(code);
+  if (!dvdId || !candidates || !candidates.length) return [];
+
+  return candidates.map(function (candidate, index) {
+    const candidateId = candidate.infoHash || extractMagnetHash(candidate.maglink) || ("idx_" + index);
+    const submitted = storeGetJSON("offline-submitted:" + dvdId + ":" + candidateId, null);
+    const size = formatSizeLabel(candidate.sizeBytes) || candidate.size || "";
+    const tags = tagText(candidate.tags);
+    let title = "";
+
+    if (submitted && submitted.ok) {
+      title = "已提交到115｜JavBus" + (size ? "｜" + size : "") + tags;
+    } else if (submitted && submitted.ok === false) {
+      title = "提交失败，可重试｜JavBus" + (size ? "｜" + size : "") + tags;
+    } else {
+      title = "确认提交115离线｜JavBus" + (size ? "｜" + size : "") + tags;
+    }
+
+    const offlineLink = buildPan115OfflineLink(
+      dvdId,
+      candidateId,
+      candidate.maglink,
+      candidate.title || title,
+      candidate.size || size
+    );
+
+    return {
+      id: "javbus-offline:" + dvdId + ":" + candidateId,
+      type: "url",
+      title,
+      name: title,
+      description: buildCandidateDescription(code, candidate, submitted),
+      link: offlineLink,
+      actionLink: offlineLink,
+      offlineLink,
+      magnetUrl: candidate.maglink,
+      mediaType: "movie"
+    };
+  });
+}
+
+function findOfflineCandidate(info) {
+  if (info && info.magnet) {
+    return {
+      title: info.title || info.dvdId || "JavBus Magnet",
+      maglink: info.magnet,
+      size: info.size || "",
+      sizeBytes: info.sizeBytes || 0,
+      infoHash: info.candidateId,
+      source: info.source || "javbus",
+      tags: []
+    };
+  }
+
+  const dvdId = info && info.dvdId;
+  const cached = storeGetJSON("magnet-candidates:" + dvdId, null);
+  const items = cached && cached.items ? cached.items : [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i] || {};
+    const candidateId = item.infoHash || extractMagnetHash(item.maglink) || ("idx_" + i);
+    if (candidateId === info.candidateId) return item;
+  }
+
+  return null;
+}
+
 function parseMagnetRows(html) {
   const rows = [];
   let match;
@@ -588,8 +845,7 @@ function parseMagnetRows(html) {
 function parseMagnetItems(html, code, detailUrl) {
   const rows = parseMagnetRows(html);
   const seen = new Set();
-  const items = [];
-  const pan115Candidates = [];
+  const candidates = [];
 
   for (const row of rows) {
     const magnetRe = /magnet:\?xt=urn:btih:[^"'<>\s]+/ig;
@@ -614,49 +870,27 @@ function parseMagnetItems(html, code, detailUrl) {
       if (hasSubtitle) tags.push("[字幕]");
       if (hasHd) tags.push("[高清]");
       const rawTitle = (tags.join("") + code + (size ? " " + size : "")).trim();
-      const title = "磁力链接｜" + rawTitle;
-      const offlineLink = buildPan115OfflineLink(code, candidateId, magnet, title, size);
 
-      pan115Candidates.push({
+      candidates.push({
         title: rawTitle,
         maglink: magnet,
         size: size || "",
         sizeBytes: parseSizeBytes(size),
         infoHash: candidateId,
         source: "javbus",
-        tags: pan115Tags
-      });
-
-      items.push({
-        id: "javbus-magnet:" + normalizePan115DvdId(code) + ":" + candidateId,
-        title: title,
-        name: title,
-        description:
-          "来源：JavBus\n" +
-          "类型：Magnet\n" +
-          "番号：" + (code || "未知") + "\n" +
-          "大小：" + (size || "未知") + "\n" +
-          "日期：" + (date || "未知") + "\n" +
-          "字幕：" + (hasSubtitle ? "是" : "未知") + "\n" +
-          "高清：" + (hasHd ? "是" : "未知") + "\n" +
-          "详情页：" + detailUrl + "\n" +
-          "操作：点击提交到 115 离线下载",
-        url: magnet,
-        videoUrl: magnet,
-        link: offlineLink,
-        actionLink: offlineLink,
-        offlineLink: offlineLink,
-        magnetUrl: magnet,
-        playerType: "system",
-        customHeaders: {
-          "X-Forward-Skip-Redirect-Probe": "1"
-        }
+        tags: pan115Tags,
+        date,
+        detailUrl
       });
     }
   }
 
-  storePan115MagnetCandidates(code, pan115Candidates);
-  return items;
+  candidates.sort(function (a, b) {
+    return scoreCandidate(b) - scoreCandidate(a);
+  });
+
+  storePan115MagnetCandidates(code, candidates);
+  return buildEpisodeItems(code, candidates);
 }
 
 async function fetchMagnets(detail, params) {
@@ -682,31 +916,225 @@ async function fetchMagnets(detail, params) {
   return parseMagnetItems(ajax.html, detail.code, detail.detailUrl);
 }
 
+function buildPan115Headers(cookie, extra) {
+  const headers = {
+    "User-Agent": UA,
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": PAN115_BASE + "/",
+    "Origin": PAN115_BASE
+  };
+
+  const normalized = normalizeCookie(cookie);
+  if (normalized) headers["Cookie"] = normalized;
+  return Object.assign(headers, extra || {});
+}
+
+function parseJsonResponse(resp, label) {
+  const data = resp && Object.prototype.hasOwnProperty.call(resp, "data") ? resp.data : resp;
+  if (typeof data === "string") {
+    const text = data.trim();
+    if (!text) throw new Error(label + " 返回空内容");
+    return JSON.parse(text);
+  }
+  if (data && typeof data === "object") return data;
+  throw new Error(label + " 返回格式异常: " + String(data));
+}
+
+function extractUidFromCookie(cookie) {
+  const uid = getCookieValue(cookie, "UID");
+  if (uid) return uid;
+
+  const first = String(cookie || "").split(";")[0].trim();
+  const idx = first.indexOf("=");
+  return idx >= 0 ? first.slice(idx + 1).trim() : "";
+}
+
+async function getOfflineSpaceToken(cookie) {
+  const url = PAN115_SPACE_URL + "&_=" + Date.now();
+  console.log(LOG_PREFIX, "获取 115 离线 token:", url);
+
+  const resp = await Widget.http.get(url, {
+    headers: buildPan115Headers(cookie),
+    timeout: REQUEST_TIMEOUT
+  });
+  const json = parseJsonResponse(resp, "115 space");
+
+  if (json.state !== true) {
+    throw new Error("115 space 获取失败: " + (json.error_msg || json.error || JSON.stringify(json)));
+  }
+  if (!json.sign || !json.time) {
+    throw new Error("115 space 未返回 sign/time");
+  }
+
+  return {
+    sign: json.sign,
+    time: json.time,
+    size: json.size,
+    limit: json.limit
+  };
+}
+
+async function submitOfflineTask(cookie, magnet, tokenObj) {
+  const maglink = getText(magnet);
+  if (!/^magnet:\?xt=urn:btih:/i.test(maglink)) {
+    throw new Error("无效磁力链接");
+  }
+
+  const uid = tokenObj.uid || extractUidFromCookie(cookie);
+  const body = "url=" + encodeURIComponent(maglink)
+    + "&uid=" + encodeURIComponent(uid)
+    + "&sign=" + encodeURIComponent(tokenObj.sign)
+    + "&time=" + encodeURIComponent(tokenObj.time);
+
+  console.log(LOG_PREFIX, "提交 115 离线任务:", maglink.slice(0, 80));
+  const resp = await Widget.http.post(PAN115_ADD_TASK_URL, body, {
+    headers: buildPan115Headers(cookie, {
+      "Content-Type": "application/x-www-form-urlencoded"
+    }),
+    timeout: 20000
+  });
+  const json = parseJsonResponse(resp, "115 add_task_url");
+
+  if (json.state === true) {
+    return {
+      state: true,
+      info_hash: json.info_hash || ""
+    };
+  }
+
+  return {
+    state: false,
+    error: json.errcode === "911"
+      ? "账号使用异常，请手工验证"
+      : (json.error_msg || json.error || "115 返回失败"),
+    errcode: json.errcode
+  };
+}
+
+async function offlineOneClick(cookie, magnet) {
+  const token = await getOfflineSpaceToken(cookie);
+  return submitOfflineTask(cookie, magnet, {
+    sign: token.sign,
+    time: token.time
+  });
+}
+
+function buildOfflineReceipt(link, ok, title, message) {
+  return {
+    id: "javbus-offline-receipt:" + simpleHash(link),
+    type: "url",
+    title,
+    name: title,
+    description: message,
+    link,
+    mediaType: "movie"
+  };
+}
+
+async function handleOfflineSubmit(params, link) {
+  const info = parseOfflineSubmitLink(link);
+  const dvdId = info.dvdId;
+  const candidateId = info.candidateId;
+
+  if (!dvdId || !candidateId) {
+    return buildOfflineReceipt(link, false, "提交失败", "未找到有效的番号和磁力候选标识。");
+  }
+
+  const submittedKey = "offline-submitted:" + dvdId + ":" + candidateId;
+  const submitted = storeGetJSON(submittedKey, null);
+  if (submitted && submitted.ok) {
+    return buildOfflineReceipt(link, true, "此前已提交到115", "这条 JavBus 磁力已经提交过。请返回详情页刷新，等待 115 资源匹配。");
+  }
+
+  const pendingKey = "offline-pending:" + dvdId + ":" + candidateId;
+  const pending = storeGetJSON(pendingKey, null);
+  if (pending && pending.time && Date.now() - pending.time < PAN115_PENDING_TTL) {
+    return buildOfflineReceipt(link, true, "任务提交中", "这条磁力正在提交处理中，短时间内不会重复提交。");
+  }
+
+  const candidate = findOfflineCandidate(info);
+  if (!candidate || !candidate.maglink) {
+    storeSetJSON(submittedKey, {
+      ok: false,
+      time: Date.now(),
+      error: "candidate not found"
+    });
+    return buildOfflineReceipt(link, false, "提交失败", "未找到对应的 JavBus 磁力候选，请返回详情页刷新后重试。");
+  }
+
+  const cookie = resolvePan115Cookie(params);
+  if (!cookie) {
+    storeSetJSON(submittedKey, {
+      ok: false,
+      time: Date.now(),
+      title: candidate.title || info.title || "",
+      error: "no 115 cookie"
+    });
+    return buildOfflineReceipt(link, false, "提交失败", "请先填写 115 Cookie，或先通过 115 模块保存登录 Cookie。");
+  }
+
+  storeSetJSON(pendingKey, { time: Date.now() });
+
+  let result;
+  try {
+    result = await offlineOneClick(cookie, candidate.maglink);
+  } catch (error) {
+    result = {
+      state: false,
+      error: error.message || String(error)
+    };
+  }
+
+  storeSetJSON(submittedKey, {
+    ok: result && result.state === true,
+    time: Date.now(),
+    title: candidate.title || info.title || "",
+    sizeText: formatSizeLabel(candidate.sizeBytes) || candidate.size || info.size || "",
+    message: result && result.error || "",
+    infoHash: result && result.info_hash || ""
+  });
+  storeSetJSON(pendingKey, { time: 0, done: true });
+
+  if (result && result.state === true) {
+    return buildOfflineReceipt(link, true, "已提交到115离线", "任务已提交。请返回详情页刷新，等待 115 资源匹配。");
+  }
+
+  return buildOfflineReceipt(link, false, "提交失败", (result && result.error) || "115 返回失败，请稍后重试。");
+}
+
 async function loadMagnetLinks(params = {}) {
   try {
-    const cookie = normalizeCookie(params.cookie);
-    if (!cookie) {
-      console.warn(LOG_PREFIX, "未配置 JavBus Cookie，无法通过年龄验证，跳过匹配");
-      return [];
-    }
-    cacheJavBusCookie(cookie);
-
     const code = extractCodeFromParams(params);
     if (!code) {
       console.log(LOG_PREFIX, "当前视频信息中未找到番号，跳过 JavBus 匹配");
       return [];
     }
 
+    const cached = storeGetJSON("magnet-candidates:" + normalizePan115DvdId(code), null);
+    if (cached && cached.items && Date.now() - cached.time < (cached.ttl || PAN115_MAGNET_CACHE_TTL)) {
+      console.log(LOG_PREFIX, "使用缓存 JavBus 磁力候选:", code, cached.items.length);
+      return buildEpisodeItems(code, cached.items);
+    }
+
+    const cookie = normalizeCookie(params.cookie || storageGet("javbus.cookie"));
+    if (!cookie) {
+      console.warn(LOG_PREFIX, "未配置 JavBus Cookie，无法通过年龄验证，跳过匹配");
+      return [];
+    }
+    cacheJavBusCookie(cookie);
+    const requestParams = Object.assign({}, params, { cookie });
+
     console.log(LOG_PREFIX, "提取到番号:", code);
 
-    const found = await findDetailByCode(code, params);
+    const found = await findDetailByCode(code, requestParams);
     if (found.blocked) return [];
     if (!found.detail) {
       console.log(LOG_PREFIX, "未找到 JavBus 精确匹配:", code);
       return [];
     }
 
-    const magnets = await fetchMagnets(found.detail, params);
+    const magnets = await fetchMagnets(found.detail, requestParams);
     console.log(LOG_PREFIX, "磁力资源数量:", magnets.length);
     return magnets;
   } catch (error) {
@@ -716,11 +1144,21 @@ async function loadMagnetLinks(params = {}) {
 }
 
 async function loadResource(params = {}) {
+  resolvePan115Cookie(params);
   const link = getText(params.link);
   if (link.indexOf("offline-submit://") === 0) {
-    console.log(LOG_PREFIX, "检测到离线提交路由，等待 pan115 处理:", link.slice(0, 120));
-    return [];
+    console.log(LOG_PREFIX, "检测到离线提交路由:", link.slice(0, 120));
+    const receipt = await handleOfflineSubmit(params, link);
+    return [receipt];
   }
 
   return loadMagnetLinks(params);
+}
+
+async function loadDetail(link, params = {}) {
+  const target = getText(link);
+  if (target.indexOf("offline-submit://") === 0) {
+    return handleOfflineSubmit(params, target);
+  }
+  return null;
 }
