@@ -1,4 +1,4 @@
-// ==================== 115 Forward Module v1.3.3 ====================
+// ==================== 115 Forward Module v1.3.4 ====================
 // 功能：
 //   1. 浏览 115 网盘文件夹，展示视频文件列表，点击进入详情页聚合播放
 //   2. 作为 Stream Source，在番号详情页下方匹配 115 文件，提供 HLS 播放源
@@ -10,6 +10,7 @@
 //   8. (NEW v1.3.1) scoreWesternFile 评分选片：排除 trailer/sample/preview，大文件优先
 //   9. (NEW v1.3.2) offline-submit:// 支持 magnet= 直传，供外部磁力区块一键提交
 //  10. (NEW v1.3.3) loadResource 支持直接 magnet: 点击路由，内部转 115 离线提交
+//  11. (NEW v1.3.4) 详情页 episodeItems 直接显示 JavBus 磁力候选
 //
 // 设计原则：
 //   - link 只放路由 + 纯 ASCII 番号（聚合触发信号），不编码中文/日文
@@ -38,10 +39,10 @@
 // ==================== 元数据定义 ====================
 var WidgetMetadata = {
   id: "pan115_v1",
-  title: "115 网盘",
+  title: "115盘",
   description: "浏览 115 网盘视频文件，提供番号匹配播放源；详情页展示 Sukebei 磁力候选，用户点击确认提交 115 离线",
   author: "forward-user",
-  version: "1.3.3",
+  version: "1.3.4",
   requiredVersion: "0.0.1",
   site: "https://115.com",
   detailCacheDuration: 300,
@@ -109,6 +110,8 @@ var PICKCODE_FILE_MAP = {};
 var API_115 = "https://115.com";
 var WEB_API_115 = "https://webapi.115.com";
 var MISS_AV = "https://missav.ai";
+var JAVBUS_BASE = "https://www.javbus.com";
+var JAVBUS_AJAX = JAVBUS_BASE + "/ajax/uncledatoolsbyajax.php";
 var TIMEOUT = 15000;
 var SUKEBEI_BASE = "https://sukebei.nyaa.si";
 var MAGNET_CACHE_TTL = 3600 * 1000;  // 1 小时
@@ -878,6 +881,9 @@ async function loadFolder(params) {
 async function loadDetail(link) {
   link = String(link || "");
   try {
+    if (link.indexOf("magnet-status://") === 0) {
+      return buildReceipt(link, false, "JavBus磁力", "这是一条状态提示，请按详情页分集说明配置 Cookie 或稍后刷新。");
+    }
     if (link.indexOf("offline-submit://") === 0) {
       return await handleOfflineSubmit(link);
     }
@@ -1468,6 +1474,280 @@ async function searchMagnetSukebei(kw) {
   return items;
 }
 
+// ==================== v1.4.0: JavBus 磁力引擎（优先） ====================
+
+function storeGetText(key) {
+  try {
+    var raw = Widget.storage.get(key);
+    return raw ? String(raw) : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function resolveJavBusCookie() {
+  var direct = storeGetText("javbus.cookie");
+  if (direct) return direct;
+
+  var runtime = storeGetJSON("javbus-stream.runtimeParams", null);
+  if (runtime && runtime.cookie) return String(runtime.cookie || "");
+
+  return "";
+}
+
+function jbDecodeHtml(value) {
+  return getText(value)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x([0-9a-f]+);/gi, function (_, hex) {
+      return String.fromCharCode(parseInt(hex, 16));
+    })
+    .replace(/&#(\d+);/g, function (_, dec) {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+}
+
+function jbStripTags(html) {
+  return jbDecodeHtml(String(html || "").replace(/<[^>]+>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function jbAttr(html, name) {
+  var re = new RegExp("\\b" + name + "\\s*=\\s*([\"'])(.*?)\\1", "i");
+  var match = String(html || "").match(re);
+  return match ? jbDecodeHtml(match[2]) : "";
+}
+
+function jbAbsoluteUrl(href) {
+  var value = jbDecodeHtml(href);
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.indexOf("//") === 0) return "https:" + value;
+  if (value.charAt(0) === "/") return JAVBUS_BASE + value;
+  return JAVBUS_BASE + "/" + value;
+}
+
+function jbHeaders(cookie, referer, extra) {
+  var headers = {
+    "User-Agent": BASE_HEADERS["User-Agent"],
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": referer || JAVBUS_BASE + "/"
+  };
+  if (cookie) headers["Cookie"] = cookie;
+  return Object.assign(headers, extra || {});
+}
+
+async function jbFetchHtml(url, cookie, referer, params) {
+  var options = {
+    headers: jbHeaders(cookie, referer),
+    timeout: 15000
+  };
+  if (params) options.params = params;
+  var resp = await Widget.http.get(url, options);
+  return String((resp && resp.data) || "");
+}
+
+function jbIsAgeVerifyPage(html) {
+  var lower = String(html || "").toLowerCase();
+  return lower.indexOf("age verification javbus") >= 0 ||
+    lower.indexOf('id="ageverify"') >= 0 ||
+    lower.indexOf("doc/driver-verify") >= 0 ||
+    lower.indexOf("你是否已經成年") >= 0 ||
+    lower.indexOf("我已經成年") >= 0;
+}
+
+function jbExtractJsValue(html, name) {
+  var patterns = [
+    new RegExp("(?:var\\s+)?" + name + "\\s*=\\s*([\"'])(.*?)\\1", "i"),
+    new RegExp("(?:var\\s+)?" + name + "\\s*=\\s*([^;\\s]+)", "i"),
+    new RegExp("[?&]" + name + "=([^&\"'<>\\s]+)", "i")
+  ];
+
+  for (var i = 0; i < patterns.length; i++) {
+    var match = String(html || "").match(patterns[i]);
+    if (match) return jbDecodeHtml(match[2] || match[1] || "");
+  }
+  return "";
+}
+
+function jbCodeFromLink(link) {
+  var href = jbDecodeHtml(link).split("?")[0].split("#")[0];
+  var parts = href.split("/").filter(Boolean);
+  return extractNumber(parts.length ? parts[parts.length - 1] : "");
+}
+
+function jbParseSearchResults(html, targetCode) {
+  var target = String(targetCode || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  var results = [];
+  var seen = {};
+  var match;
+  var re = /<a\b(?=[^>]*class\s*=\s*["'][^"']*\bmovie-box\b[^"']*["'])([^>]*)>([\s\S]*?)<\/a>/gi;
+
+  while ((match = re.exec(String(html || ""))) !== null) {
+    var link = jbAbsoluteUrl(jbAttr(match[1], "href"));
+    if (!link || seen[link]) continue;
+    var title = jbAttr(match[2], "title") || jbStripTags(match[2]);
+    var code = jbCodeFromLink(link) || extractNumber(title);
+    var normalized = String(code || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+    if (!normalized || normalized !== target) continue;
+    seen[link] = true;
+    results.push({ code: code, link: link, title: title || code });
+  }
+
+  return results;
+}
+
+function jbParseDetail(html, detailUrl, code) {
+  return {
+    code: code,
+    detailUrl: detailUrl,
+    gid: jbExtractJsValue(html, "gid"),
+    uc: jbExtractJsValue(html, "uc") || "0",
+    img: jbExtractJsValue(html, "img")
+  };
+}
+
+async function jbFindDetailByCode(code, cookie) {
+  var directUrl = JAVBUS_BASE + "/" + encodeURIComponent(code);
+  var direct = await jbFetchHtml(directUrl, cookie, JAVBUS_BASE + "/");
+  if (jbIsAgeVerifyPage(direct)) return { blocked: true, detail: null };
+
+  var directDetail = jbParseDetail(direct, directUrl, code);
+  if (directDetail.gid) return { blocked: false, detail: directDetail };
+
+  var searchUrl = JAVBUS_BASE + "/search/" + encodeURIComponent(code) + "&type=&parent=ce";
+  var search = await jbFetchHtml(searchUrl, cookie, JAVBUS_BASE + "/");
+  if (jbIsAgeVerifyPage(search)) return { blocked: true, detail: null };
+
+  var matches = jbParseSearchResults(search, code);
+  if (!matches.length) return { blocked: false, detail: null };
+
+  var picked = matches[0];
+  var detailHtml = await jbFetchHtml(picked.link, cookie, searchUrl);
+  if (jbIsAgeVerifyPage(detailHtml)) return { blocked: true, detail: null };
+
+  var detail = jbParseDetail(detailHtml, picked.link, picked.code || code);
+  return { blocked: false, detail: detail.gid ? detail : null };
+}
+
+function jbInfoHash(maglink) {
+  var match = String(maglink || "").match(/btih:([a-z0-9]{32,40})/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function jbMagnetSize(text) {
+  var match = String(text || "").match(/\b(\d+(?:\.\d+)?\s*(?:GiB|MiB|GB|G|MB|M))\b/i);
+  return match ? match[1].replace(/\s+/g, " ").toUpperCase() : "";
+}
+
+function jbMagnetDate(text) {
+  var match = String(text || "").match(/\b(20\d{2}[-/.]\d{1,2}[-/.]\d{1,2})\b/);
+  return match ? match[1].replace(/[/.]/g, "-") : "";
+}
+
+function jbParseMagnetRows(html) {
+  var rows = [];
+  var match;
+  var trRe = /<tr\b[\s\S]*?<\/tr>/gi;
+  while ((match = trRe.exec(String(html || ""))) !== null) rows.push(match[0]);
+  if (rows.length) return rows;
+
+  var text = String(html || "");
+  var magnetRe = /magnet:\?xt=urn:btih:[^"'<>\s]+/gi;
+  while ((match = magnetRe.exec(text)) !== null) {
+    var start = Math.max(0, match.index - 300);
+    var end = Math.min(text.length, match.index + match[0].length + 300);
+    rows.push(text.slice(start, end));
+  }
+  return rows;
+}
+
+function jbParseMagnetItems(html, code, detailUrl) {
+  var rows = jbParseMagnetRows(html);
+  var seen = {};
+  var items = [];
+
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var magnetRe = /magnet:\?xt=urn:btih:[^"'<>\s]+/ig;
+    var match;
+
+    while ((match = magnetRe.exec(row)) !== null) {
+      var magnet = jbDecodeHtml(match[0]);
+      var infoHash = jbInfoHash(magnet) || simpleHash(magnet);
+      if (!infoHash || seen[infoHash]) continue;
+      seen[infoHash] = true;
+
+      var rowText = jbStripTags(row);
+      var size = jbMagnetSize(rowText);
+      var hasSubtitle = /字幕|中文字幕|subtitle|\bsub\b/i.test(rowText);
+      var hasHd = /高清|\bHD\b|1080|720|4K/i.test(rowText);
+      var tags = [];
+      if (hasSubtitle) tags.push("cnsub");
+      if (hasHd) tags.push("hd");
+      if (/4K|2160/i.test(rowText)) tags.push("4k");
+
+      items.push({
+        title: (code + (size ? " " + size : "")).trim(),
+        maglink: magnet,
+        size: size || "",
+        sizeBytes: parseSizeBytes(size),
+        infoHash: infoHash,
+        source: "javbus",
+        tags: tags,
+        date: jbMagnetDate(rowText),
+        detailUrl: detailUrl
+      });
+    }
+  }
+
+  items.sort(function (a, b) { return scoreCandidate(b) - scoreCandidate(a); });
+  return items;
+}
+
+async function searchMagnetJavBus(code) {
+  var cookie = resolveJavBusCookie();
+  if (!cookie) {
+    console.log("[magnet:javbus] no javbus.cookie, skip");
+    return [];
+  }
+
+  var found = await jbFindDetailByCode(code, cookie);
+  if (found.blocked) {
+    console.log("[magnet:javbus] age verification blocked:", code);
+    return [];
+  }
+  if (!found.detail) {
+    console.log("[magnet:javbus] no detail:", code);
+    return [];
+  }
+
+  var ajax = await Widget.http.get(JAVBUS_AJAX, {
+    headers: jbHeaders(cookie, found.detail.detailUrl, {
+      "X-Requested-With": "XMLHttpRequest"
+    }),
+    params: {
+      gid: found.detail.gid,
+      lang: "zh",
+      img: found.detail.img || "",
+      uc: found.detail.uc || "0",
+      floor: String(Math.floor(Math.random() * 1000 + 1))
+    },
+    timeout: 15000
+  });
+  var html = String((ajax && ajax.data) || "");
+  if (jbIsAgeVerifyPage(html)) return [];
+
+  var items = jbParseMagnetItems(html, code, found.detail.detailUrl);
+  console.log("[magnet:javbus] result count:", items.length);
+  return items;
+}
+
 // ==================== v1.2.0: 磁力候选管理与 episodeItems ====================
 
 /**
@@ -1477,7 +1757,8 @@ async function searchMagnetSukebei(kw) {
  * - 任何异常返回空数组，不阻塞详情页
  */
 async function getMagnetCandidatesWithCache(number) {
-  var dvdId = (number || "").trim().toLowerCase();
+  var searchCode = (number || "").trim();
+  var dvdId = searchCode.toLowerCase();
   if (!dvdId) return [];
 
   // 1. 读缓存
@@ -1487,25 +1768,54 @@ async function getMagnetCandidatesWithCache(number) {
     return buildEpisodeItems(dvdId, cached.items);
   }
 
-  // 2. 搜索 Sukebei（超时由 Widget.http.get 的 timeout 参数保障）
-  console.log("[magnet] search start:", dvdId);
+  // 2. 优先搜索 JavBus，和 javbus-stream.js 共用同一个缓存键
+  console.log("[magnet] javbus search start:", dvdId);
   var items = [];
   try {
-    items = await searchMagnetSukebei(dvdId);
-    console.log("[magnet] search done:", dvdId, items.length);
+    items = await searchMagnetJavBus(searchCode);
+    console.log("[magnet] javbus search done:", dvdId, items.length);
   } catch (e) {
-    console.error("[magnet] search failed:", e && e.message || e);
+    console.error("[magnet] javbus search failed:", e && e.message || e);
     items = [];
   }
 
-  // 3. 写缓存
+  // 3. JavBus 不可用时保留 Sukebei 兜底，避免详情页完全没有候选。
+  if (!items.length) {
+    console.log("[magnet] sukebei fallback start:", dvdId);
+    try {
+      items = await searchMagnetSukebei(dvdId);
+      console.log("[magnet] sukebei fallback done:", dvdId, items.length);
+    } catch (e) {
+      console.error("[magnet] sukebei fallback failed:", e && e.message || e);
+      items = [];
+    }
+  }
+
+  // 4. 写缓存
   if (items.length > 0) {
-    storeSetJSON("magnet-candidates:" + dvdId, { time: Date.now(), items: items });
+    storeSetJSON("magnet-candidates:" + dvdId, {
+      time: Date.now(),
+      ttl: MAGNET_CACHE_TTL,
+      items: items
+    });
   } else {
     console.log("[magnet] no candidates, skip empty cache:", dvdId);
   }
 
-  // 4. 构建 episodeItems（含提交状态）
+  if (!items.length) {
+    var hasJavBusCookie = !!resolveJavBusCookie();
+    return [
+      buildMagnetStatusEpisodeItem(
+        dvdId,
+        hasJavBusCookie ? "JavBus磁力｜暂无候选" : "JavBus磁力｜需要配置 Cookie",
+        hasJavBusCookie
+          ? "JavBus 暂未返回该番号的磁力候选，或资源站暂时不可用。"
+          : "请先在 javbus-stream.js 配置 JavBus Cookie，并刷新一次，让 pan115 读取 javbus.cookie。"
+      )
+    ];
+  }
+
+  // 5. 构建 episodeItems（含提交状态）
   return buildEpisodeItems(dvdId, items);
 }
 
@@ -1528,18 +1838,18 @@ function buildEpisodeItems(dvdId, candidates) {
       if (c.tags.indexOf("hd") >= 0)    tagText += "｜高清";
       if (c.tags.indexOf("4k") >= 0)    tagText += "｜4K";
     }
-    var sourceLabel = "Sukebei";
+    var sourceLabel = c.source === "javbus" ? "JavBus" : "Sukebei";
     var title = "";
     var desc = "";
 
     if (submitted && submitted.ok) {
-      title = "✅ 已提交到115" + (sizeLabel ? "｜" + sizeLabel : "") + tagText;
+      title = "✅ 已提交到115｜" + sourceLabel + (sizeLabel ? "｜" + sizeLabel : "") + tagText;
       desc = "已提交到 115。请返回原详情页刷新，等待资源匹配。";
     } else if (submitted && !submitted.ok) {
-      title = "⚠️ 上次提交失败｜" + sizeLabel;
+      title = "⚠️ 上次提交失败｜" + sourceLabel + (sizeLabel ? "｜" + sizeLabel : "");
       desc = "点击可重试 · 来源: " + sourceLabel;
     } else {
-      title = "⬇️ 115离线｜点击提交｜" + (sizeLabel ? sizeLabel + tagText : "");
+      title = "⬇️ 115离线｜点击提交｜" + sourceLabel + (sizeLabel ? "｜" + sizeLabel : "") + tagText;
       desc = "来源: " + sourceLabel + " · 打开此卡片会提交到 115 离线";
     }
 
@@ -1548,10 +1858,26 @@ function buildEpisodeItems(dvdId, candidates) {
       type: "url",
       title: title,
       description: desc,
-      link: "offline-submit://" + dvdId + "?cid=" + candidateId
+      link: "offline-submit://" + dvdId + "?cid=" + candidateId,
+      actionLink: "offline-submit://" + dvdId + "?cid=" + candidateId,
+      offlineLink: "offline-submit://" + dvdId + "?cid=" + candidateId,
+      magnetUrl: c.maglink || ""
       // 不设置 videoUrl / previewUrl / playerType
     };
   });
+}
+
+function buildMagnetStatusEpisodeItem(dvdId, title, description) {
+  return {
+    id: "magnet-status:" + dvdId,
+    type: "url",
+    title: title,
+    description: description,
+    link: "magnet-status://" + dvdId,
+    actionLink: "magnet-status://" + dvdId,
+    offlineLink: "",
+    magnetUrl: ""
+  };
 }
 
 // ==================== v1.2.0: handleNormalDetail 详情页 + 磁力候选区 ====================
@@ -1630,20 +1956,25 @@ async function handleNormalDetail(link) {
   if (number) {
     candidates = await getMagnetCandidatesWithCache(number);
   }
-  // episodeItems 不放入磁力候选（避免污染详情页标题/分集状态）
-  item.episodeItems = [];
+  // 离线候选放入 episodeItems，详情页分集区直接展示可点击提交项。
+  item.episodeItems = candidates;
+  item.childItems = candidates;
 
-  // 离线候选放入 relatedItems，卡片会触发 loadResource → handleOfflineSubmitFromResource
+  // 同时保留 relatedItems，兼容部分宿主只渲染 relatedItems 的场景。
   item.relatedItems = candidates.map(function (c) {
     return {
       id: c.id,
       type: "url",
       title: c.title,
       description: c.description,
-      link: c.link
+      link: c.link,
+      actionLink: c.actionLink || c.link,
+      offlineLink: c.offlineLink || c.link,
+      magnetUrl: c.magnetUrl || ""
     };
   });
-  console.log("[pan115/detail] relatedItems count:", item.relatedItems.length);
+  console.log("[pan115/detail] episodeItems count:", item.episodeItems.length,
+              "relatedItems count:", item.relatedItems.length);
 
   return item;
 }
