@@ -1,4 +1,4 @@
-// ==================== 115 Forward Module v1.3.4 ====================
+// ==================== 115 Forward Module v1.3.5 ====================
 // 功能：
 //   1. 浏览 115 网盘文件夹，展示视频文件列表，点击进入详情页聚合播放
 //   2. 作为 Stream Source，在番号详情页下方匹配 115 文件，提供 HLS 播放源
@@ -42,10 +42,10 @@ var WidgetMetadata = {
   title: "115盘",
   description: "浏览 115 网盘视频文件，提供番号匹配播放源；详情页展示 Sukebei 磁力候选，用户点击确认提交 115 离线",
   author: "forward-user",
-  version: "1.3.4",
+  version: "1.3.5",
   requiredVersion: "0.0.1",
   site: "https://115.com",
-  detailCacheDuration: 300,
+  detailCacheDuration: 0,
 
   globalParams: [
     {
@@ -1856,13 +1856,17 @@ function buildEpisodeItems(dvdId, candidates) {
     return {
       id: "offline:" + dvdId + ":" + candidateId,
       type: "url",
+      mediaType: "movie",
       title: title,
       description: desc,
       link: "offline-submit://" + dvdId + "?cid=" + candidateId,
       actionLink: "offline-submit://" + dvdId + "?cid=" + candidateId,
       offlineLink: "offline-submit://" + dvdId + "?cid=" + candidateId,
-      magnetUrl: c.maglink || ""
-      // 不设置 videoUrl / previewUrl / playerType
+      magnetUrl: c.maglink || "",
+      episode: idx + 1,
+      originalTitle: dvdId,
+      playerType: "system"
+      // 不设置 videoUrl / previewUrl
     };
   });
 }
@@ -1871,12 +1875,16 @@ function buildMagnetStatusEpisodeItem(dvdId, title, description) {
   return {
     id: "magnet-status:" + dvdId,
     type: "url",
+    mediaType: "movie",
     title: title,
     description: description,
     link: "magnet-status://" + dvdId,
     actionLink: "magnet-status://" + dvdId,
     offlineLink: "",
-    magnetUrl: ""
+    magnetUrl: "",
+    episode: 1,
+    originalTitle: dvdId,
+    playerType: "system"
   };
 }
 
@@ -1927,7 +1935,7 @@ async function handleNormalDetail(link) {
   var item = {
     id: itemId,
     vod_id: itemId,
-    type: "detail",
+    type: "url",
     title: title,
     name: title,
     originalTitle: number || title,
@@ -1935,8 +1943,10 @@ async function handleNormalDetail(link) {
     backdropPath: cached.backdropPath || "",
     coverUrl: cached.backdropPath || "",
     posterPath: cached.backdropPath || "",
+    previewUrl: cached.backdropPath || "",
     mediaType: "movie",
     link: cleanLink,
+    playerType: "system",
     episodeItems: []    // 占位，后续填充
   };
 
@@ -1955,6 +1965,12 @@ async function handleNormalDetail(link) {
   var candidates = [];
   if (number) {
     candidates = await getMagnetCandidatesWithCache(number);
+  } else {
+    candidates = [buildMagnetStatusEpisodeItem(
+      "unknown",
+      "JavBus磁力｜未识别番号",
+      "未能从文件名或详情链接识别番号，无法搜索 JavBus 磁力。"
+    )];
   }
   // 离线候选放入 episodeItems，详情页分集区直接展示可点击提交项。
   item.episodeItems = candidates;
@@ -1965,12 +1981,16 @@ async function handleNormalDetail(link) {
     return {
       id: c.id,
       type: "url",
+      mediaType: c.mediaType || "movie",
       title: c.title,
       description: c.description,
       link: c.link,
       actionLink: c.actionLink || c.link,
       offlineLink: c.offlineLink || c.link,
-      magnetUrl: c.magnetUrl || ""
+      magnetUrl: c.magnetUrl || "",
+      episode: c.episode,
+      originalTitle: c.originalTitle || number || title,
+      playerType: c.playerType || "system"
     };
   });
   console.log("[pan115/detail] episodeItems count:", item.episodeItems.length,

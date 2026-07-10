@@ -4,9 +4,9 @@ WidgetMetadata = {
   description: "通过番号匹配 JavBus 磁力资源",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.4.1",
+  version: "1.4.2",
   requiredVersion: "0.0.1",
-  detailCacheDuration: 60,
+  detailCacheDuration: 0,
   globalParams: [
     {
       name: "cookie",
@@ -28,7 +28,7 @@ WidgetMetadata = {
       description: "根据当前视频信息匹配 JavBus 磁力链接，点击提交到 115 离线下载",
       functionName: "loadResource",
       type: "stream",
-      cacheDuration: 120,
+      cacheDuration: 0,
       params: []
     }
   ]
@@ -818,6 +818,8 @@ function buildStatusEpisodeItem(code, title, message) {
     name: title,
     description: message,
     link: "magnet-status://" + dvdId,
+    episode: 1,
+    originalTitle: code || title,
     playerType: "system"
   };
 }
@@ -859,7 +861,10 @@ function buildEpisodeItems(code, candidates) {
       actionLink: offlineLink,
       offlineLink,
       magnetUrl: candidate.maglink,
-      mediaType: "movie"
+      mediaType: "movie",
+      episode: index + 1,
+      originalTitle: code || title,
+      playerType: "system"
     };
   });
 }
@@ -900,7 +905,7 @@ function buildMagnetDetailItem(params, code, episodeItems) {
   return {
     id: "javbus-magnets:" + dvdId,
     vod_id: "javbus-magnets:" + dvdId,
-    type: "detail",
+    type: "url",
     mediaType: "movie",
     title,
     name: title,
@@ -1284,7 +1289,13 @@ async function loadDetail(link, params = {}) {
   const code = extractCodeFromParams(runtime);
   if (!code) {
     console.log(LOG_PREFIX, "loadDetail 未找到番号，无法构建 episodeItems");
-    return null;
+    return buildMagnetDetailItem(runtime, "unknown", [
+      buildStatusEpisodeItem(
+        "unknown",
+        "JavBus磁力｜未识别番号",
+        "当前详情数据中没有可识别的番号，无法搜索 JavBus 磁力。"
+      )
+    ]);
   }
 
   const episodeItems = await loadMagnetLinks(runtime, { includeStatus: true });
