@@ -4,7 +4,7 @@ WidgetMetadata = {
   description: "通过番号匹配 JavBus 磁力资源",
   author: "EL",
   site: "https://www.javbus.com",
-  version: "1.4.2",
+  version: "1.4.3",
   requiredVersion: "0.0.1",
   detailCacheDuration: 0,
   globalParams: [
@@ -699,17 +699,9 @@ function storePan115MagnetCandidates(code, candidates) {
   }
 }
 
-function buildPan115OfflineLink(code, candidateId, magnet, title, size) {
-  const query = [
-    "cid=" + encodeURIComponent(candidateId),
-    "magnet=" + encodeURIComponent(magnet || ""),
-    "title=" + encodeURIComponent(title || code || "JavBus Magnet")
-  ];
-
-  if (size) query.push("size=" + encodeURIComponent(size));
-  query.push("source=javbus");
-
-  return "offline-submit://" + normalizePan115DvdId(code) + "?" + query.join("&");
+function buildPan115OfflineLink(code, candidateId) {
+  return "offline-submit://" + normalizePan115DvdId(code)
+    + "?cid=" + encodeURIComponent(candidateId);
 }
 
 function parseQueryString(query) {
@@ -843,28 +835,14 @@ function buildEpisodeItems(code, candidates) {
       title = "确认提交115离线｜JavBus" + (size ? "｜" + size : "") + tags;
     }
 
-    const offlineLink = buildPan115OfflineLink(
-      dvdId,
-      candidateId,
-      candidate.maglink,
-      candidate.title || title,
-      candidate.size || size
-    );
+    const offlineLink = buildPan115OfflineLink(dvdId, candidateId);
 
     return {
       id: "javbus-offline:" + dvdId + ":" + candidateId,
       type: "url",
       title,
-      name: title,
       description: buildCandidateDescription(code, candidate, submitted),
-      link: offlineLink,
-      actionLink: offlineLink,
-      offlineLink,
-      magnetUrl: candidate.maglink,
-      mediaType: "movie",
-      episode: index + 1,
-      originalTitle: code || title,
-      playerType: "system"
+      link: offlineLink
     };
   });
 }
@@ -1174,7 +1152,7 @@ async function handleOfflineSubmit(params, link) {
       title: candidate.title || info.title || "",
       error: "no 115 cookie"
     });
-    return buildOfflineReceipt(link, false, "提交失败", "请先填写 115 Cookie，或先通过 115 模块保存登录 Cookie。");
+    return buildOfflineReceipt(link, false, "提交失败", "请先在本模块的全局参数中填写 115 Cookie。");
   }
 
   storeSetJSON(pendingKey, { time: Date.now() });
@@ -1267,8 +1245,8 @@ async function loadResource(params = {}) {
   const link = getText(params.link);
   if (link.indexOf("offline-submit://") === 0) {
     console.log(LOG_PREFIX, "检测到离线提交路由:", link.slice(0, 120));
-    const receipt = await handleOfflineSubmit(runtime, link);
-    return [receipt];
+    await handleOfflineSubmit(runtime, link);
+    return [];
   }
 
   return loadMagnetLinks(runtime);
